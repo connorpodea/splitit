@@ -97,6 +97,32 @@ func (s *Store) GetUser(id string) (*models.User, error) {
 	return &u, nil
 }
 
+func (s *Store) ListUsers() ([]*models.User, error) {
+	query := "Select id, name, email, balance FROM users;"
+
+	rows, err := s.db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+
+	defer rows.Close()
+
+	var users []*models.User
+
+	for rows.Next() {
+		var u models.User
+
+		err := rows.Scan(&u.ID, &u.Name, &u.Email, &u.Balance)
+		if err != nil {
+			return nil, err
+		}
+
+		users = append(users, &u)
+	}
+
+	return users, nil
+}
+
 func (s *Store) Pay(p *models.Payment) error {
 	transaction, err := s.db.Begin()
 

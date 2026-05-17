@@ -79,4 +79,11 @@ func main() {
 	fmt.Printf("Successfully retrieved the user with ID %s (Name: %s, Email: %s, Balance: %.2f)\n",
 		foundUser2.ID, foundUser2.Name, foundUser2.Email, foundUser2.Balance)
 
+	users, err := s.ListUsers()
+	if err != nil {
+		log.Fatalf("Failed to retrieve all users: %v", err)
+	}
+	for index, user := range users {
+		fmt.Printf("%d. Name: %s | Balance: %.2f\n", index + 1, user.Name, user.Balance)
+	}
 }
