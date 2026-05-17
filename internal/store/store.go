@@ -2,6 +2,9 @@ package store
 
 import (
 	"database/sql"
+	"fmt"
+	"math"
+	"time"
 
 	// This driver connects the Go code to the SQLite database file system
 	"github.com/connorpodea/splitit/internal/models"
@@ -42,7 +45,7 @@ func (s *Store) createTables() error {
 		email TEXT,
 		phone_number TEXT,
 		balance REAL,
-		credit_score INTEGER DEFAULT 600,
+		credit_score INTEGER DEFAULT 50,
 		credit_limit REAL DEFAULT 1000.00,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);`
@@ -99,10 +102,10 @@ func (s *Store) createTables() error {
 
 func (s *Store) CreateUser(u *models.User) error {
 	query := `
-	INSERT INTO users (id, name, email, phone_number, balance) 
-	values(?,?,?,?,?);`
+INSERT INTO users (id, name, email, phone_number, balance, credit_score, credit_limit) 
+VALUES (?, ?, ?, ?, ?, ?, ?);`
 
-	_, err := s.db.Exec(query, u.ID, u.Name, u.Email, u.PhoneNumber, u.Balance)
+	_, err := s.db.Exec(query, u.ID, u.Name, u.Email, u.PhoneNumber, u.Balance, u.CreditScore, u.CreditLimit)
 	return err
 }
 
@@ -187,4 +190,113 @@ func (s *Store) Pay(p *models.Payment) error {
 	}
 
 	return transaction.Commit()
+}
+
+func (s *Store) CreateBNPLLoan(p *models.Payment) error {
+	if p.TotalInstallments == 0 {
+		return fmt.Errorf("Total installments cannot be zero")
+	}
+
+	// Variable for the raw price before fees
+	itemPrice := p.TotalAmount
+
+	// Check the senders credit metrics
+	sender, err := s.GetUser(p.SenderID)
+	if err != nil {
+		return fmt.Errorf("Failed to fetch sender metrics: %v", err)
+	}
+
+	// Calculate the risk fee based on their credit health score
+	feeRate := s.CalculateFeeRate(sender.CreditScore)
+
+	// Update the senders purchase amount by the fee rate
+	totalDebt := itemPrice + (feeRate * itemPrice)
+
+	baseAmount := math.Floor((totalDebt/float64(p.TotalInstallments))*100) / 100
+
+	// Calculate the leftover pennies to add to initial installment
+	remainder := totalDebt - (baseAmount * float64(p.TotalInstallments))
+
+	// The app treasury pays the seller the full item price immediately
+	fundingPayment := &models.Payment{
+		ID:                fmt.Sprintf("fund_%s", p.ID),
+		SenderID:          "app_treasury", // Your app pools the capital
+		ReceiverID:        p.ReceiverID,   // The seller receives it
+		Amount:            itemPrice,
+		TotalAmount:       itemPrice,
+		PaymentType:       "treasury_funding",
+		TotalInstallments: 1,
+		Status:            "completed",
+		Note:              fmt.Sprintf("Treasury funded purchase for payment %s", p.ID),
+	}
+	err = s.Pay(fundingPayment)
+	if err != nil {
+		return fmt.Errorf("Treasure merchant funding failed: %v", err)
+	}
+
+	// Charge the buyer their upfront down payment back to the app treasury
+	p.Amount = baseAmount + remainder
+	p.TotalAmount = totalDebt
+	p.ReceiverID = "app_treasury"
+	p.PaymentType = "installment"
+
+	// Trigger the ledger execution
+	err = s.Pay(p)
+	if err != nil {
+		return fmt.Errorf("Upfront payment failed: %v", err)
+	}
+
+	// Restore back to the total debt for the database installment records
+	p.TotalAmount = itemPrice + (feeRate * itemPrice)
+
+	// Build the remaining debt calendar schedule into the installments table
+	currentTime := time.Now()
+
+	for i := uint8(1); i <= p.TotalInstallments; i++ {
+		var installmentAmount float64
+		var isPaid bool
+		var dueDate time.Time
+
+		if i == 1 {
+			// Installment 1 is paid upfront during s.Pay(p)
+			installmentAmount = baseAmount + remainder
+			isPaid = true
+			dueDate = currentTime
+		} else {
+			installmentAmount = baseAmount
+			isPaid = false
+			// Stagger deadlines by 14 days multiplies by the installment index
+			dueDate = currentTime.AddDate(0, 0, int(i-1)*14)
+		}
+
+		// Generate a structured identifier for each installment row
+		installmentID := fmt.Sprintf("inst_%s_%d", p.ID, i)
+
+		isPaidInt := 0
+		if isPaid {
+			isPaidInt = 1
+		}
+
+		query := `INSERT INTO installments (id, payment_id, user_id, amount, due_date, is_paid)
+		VALUES (?,?,?,?,?,?)`
+
+		_, err = s.db.Exec(query, installmentID, p.ID, p.SenderID, installmentAmount, dueDate.Format("2006-01-02"), isPaidInt)
+		if err != nil {
+			return fmt.Errorf("Failed to save installment %d: %v", i, err)
+		}
+	}
+	return nil
+}
+
+func (s *Store) CalculateFeeRate(creditScore uint8) float64 {
+	switch {
+	case creditScore >= 90:
+		return 0.00
+	case creditScore >= 75:
+		return 0.01
+	case creditScore >= 50:
+		return 0.02
+	default:
+		return 0.07
+	}
 }
