@@ -119,7 +119,6 @@ func (s *Store) ListUsers() ([]*models.User, error) {
 
 		users = append(users, &u)
 	}
-
 	return users, nil
 }
 
