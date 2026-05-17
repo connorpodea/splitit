@@ -1,4 +1,4 @@
-module github.com/you/p2p-bnpl
+module github.com/connorpodea/splitit
 
 go 1.25.0
 
