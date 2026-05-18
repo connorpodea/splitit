@@ -91,6 +91,8 @@ func (s *Store) createTables() error {
 	id TEXT PRIMARY KEY,
 	requester_id TEXT,
 	payer_id TEXT,
+	amount REAL,
+	note TEXT,
 	status TEXT,
 	created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 	FOREIGN KEY (requester_id) REFERENCES users (id),
@@ -265,7 +267,7 @@ func (s *Store) Pay(payment *models.Payment) error {
 }
 
 func (s *Store) CreateBNPLLoan(payment *models.Payment) error {
-	if p.TotalInstallments == 0 {
+	if payment.TotalInstallments == 0 {
 		return fmt.Errorf("Total installments cannot be zero")
 	}
 
@@ -300,7 +302,7 @@ func (s *Store) CreateBNPLLoan(payment *models.Payment) error {
 		PaymentType:       "treasury_funding",
 		TotalInstallments: 1,
 		Status:            "completed",
-		Note:              fmt.Sprintf("Treasury funded purchase for payment %s", p.ID),
+		Note:              fmt.Sprintf("Treasury funded purchase for payment %s", payment.ID),
 	}
 
 	err := s.Pay(fundingPayment)
@@ -321,12 +323,12 @@ func (s *Store) CreateBNPLLoan(payment *models.Payment) error {
 	}
 
 	// Restore back to the total debt for the database installment records
-	p.TotalAmount = itemPrice + (feeRate * itemPrice)
+	payment.TotalAmount = itemPrice + (feeRate * itemPrice)
 
 	// Build the remaining debt calendar schedule into the installments table
 	currentTime := time.Now()
 
-	for i := uint8(1); i <= p.TotalInstallments; i++ {
+	for i := uint8(1); i <= payment.TotalInstallments; i++ {
 		var installmentAmount float64
 		var isPaid bool
 		var dueDate time.Time
@@ -382,8 +384,8 @@ func (s *Store) CalculateFeeRate(creditScore uint8) float64 {
 
 func (s *Store) SendFriendRequest(request *models.FriendRequest) error {
 	query := `
-	INSERT INTO into friend_requests 
-	(request_id, sender_id, receiver_id)
+	INSERT INTO friend_requests 
+	(id, sender_id, receiver_id)
 	VALUES (?,?,?);`
 
 	_, err := s.db.Exec(query, request.ID, request.SenderID, request.ReceiverID)
@@ -395,7 +397,7 @@ func (s *Store) SendFriendRequest(request *models.FriendRequest) error {
 
 func (s *Store) ListIncomingFriendRequests(userID string) ([]*models.FriendRequest, error) {
 	query := `
-	SELECT sender_id, receiver_id, accepted, created_at
+	SELECT id, sender_id, receiver_id, accepted, created_at
 	FROM friend_requests
 	WHERE receiver_id = ? AND accepted = 0;`
 
@@ -421,6 +423,11 @@ func (s *Store) ListIncomingFriendRequests(userID string) ([]*models.FriendReque
 		return nil, err
 	}
 	return requests, nil
+}
+
+func (s *Store) ListOutgoingFriendRequests(userID string) ([]*models.FriendRequest, error) {
+	// fill this out
+	return nil, nil
 }
 
 func (s *Store) AcceptFriendRequest(requestID, senderID, receiverID string) error {
@@ -511,6 +518,65 @@ func (s *Store) ListFriends(userID string) ([]*models.Profile, error) {
 	return friends, nil
 }
 
-func (s *Store) CreatePaymentRequest(request *models.PaymentRequest) {
-	
+func (s *Store) CreatePaymentRequest(request *models.PaymentRequest) error {
+	query := `
+	INSERT INTO payment_requests
+	(id, requester_id, payer_id, amount, note, status, created_at)
+	VALUES (?,?,?,?,?,?,?);`
+
+	_, err := s.db.Exec(query, request.ID, request.RequesterID, request.PayerID, request.Amount, request.Note, request.Status, request.CreatedAt)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *Store) ListIncomingPaymentRequests(userID string) ([]*models.PaymentRequest, error) {
+	query := `
+	SELECT id, requester_id, payer_id, amount, note, status,created_at
+	FROM payment_requests
+	WHERE payer_id = ? AND status = 'pending'`
+
+	rows, err := s.db.Query(query, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var requests []*models.PaymentRequest
+
+	for rows.Next() {
+		var r models.PaymentRequest
+
+		err = rows.Scan(&r.ID, &r.RequesterID, &r.PayerID, &r.Amount, &r.Note, &r.Status, &r.CreatedAt)
+
+		if err != nil {
+			return nil, err
+		}
+		requests = append(requests, &r)
+	}
+
+	// Check for errors encountered during iteration
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	return requests, nil
+}
+
+func (s *Store) ListOutgoingPaymentRequests(userID string) ([]*models.PaymentRequest, error) {
+	// fill this out
+	return nil, nil
+}
+
+func (s *Store) UpdatePaymentRequestStatus(paymentID, new_status string) error {
+	query := `
+	UPDATE payment_requests
+	SET status = ?
+	WHERE id = ?;`
+
+	_, err := s.db.Exec(query, paymentID, new_status)
+	if err != nil {
+		return err
+	}
+	return nil
 }
