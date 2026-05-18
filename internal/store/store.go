@@ -149,7 +149,6 @@ func (s *Store) createTables() error {
 	id TEXT PRIMARY KEY,
 	sender_id TEXT,
 	receiver_id TEXT,
-	accepted INTEGER DEFAULT 0,
 	created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 	FOREIGN KEY (sender_id) REFERENCES users (id),
 	FOREIGN KEY (receiver_id) REFERENCES users (id)
@@ -440,9 +439,9 @@ func (s *Store) SendFriendRequest(request *models.FriendRequest) error {
 
 func (s *Store) ListIncomingFriendRequests(userID string) ([]*models.FriendRequest, error) {
 	query := `
-	SELECT id, sender_id, receiver_id, accepted, created_at
+	SELECT id, sender_id, receiver_id, created_at
 	FROM friend_requests
-	WHERE receiver_id = ? AND accepted = 0;`
+	WHERE receiver_id = ?;`
 
 	rows, err := s.db.Query(query, userID)
 	if err != nil {
@@ -454,7 +453,7 @@ func (s *Store) ListIncomingFriendRequests(userID string) ([]*models.FriendReque
 	var requests []*models.FriendRequest
 	for rows.Next() {
 		var r models.FriendRequest
-		err := rows.Scan(&r.ID, &r.SenderID, &r.ReceiverID, &r.Accepted, &r.CreatedAt)
+		err := rows.Scan(&r.ID, &r.SenderID, &r.ReceiverID, &r.CreatedAt)
 		if err != nil {
 			return nil, err
 		}
@@ -578,7 +577,7 @@ func (s *Store) ListIncomingPaymentRequests(userID string) ([]*models.PaymentReq
 	query := `
 	SELECT id, requester_id, payer_id, amount, note, status,created_at
 	FROM payment_requests
-	WHERE payer_id = ? AND status = 'pending'`
+	WHERE payer_id = ? AND status = 'pending';`
 
 	rows, err := s.db.Query(query, userID)
 	if err != nil {

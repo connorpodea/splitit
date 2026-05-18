@@ -56,6 +56,5 @@ type FriendRequest struct {
 	ID         string `json:"id"`
 	SenderID   string `json:"sender_id"`
 	ReceiverID string `json:"receiver_id"`
-	Accepted   bool   `json:"accepted"`
 	CreatedAt  string `json:"created_at"`
 }
