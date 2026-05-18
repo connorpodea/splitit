@@ -36,6 +36,14 @@ func New() (*Store, error) {
 	return s, nil
 }
 
+// current tables:
+// users
+// payments
+// payment_requests
+// installments
+// friends
+// friend_requests
+
 func (s *Store) createTables() error {
 	// users table
 	query := `
@@ -71,6 +79,22 @@ func (s *Store) createTables() error {
 	created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 	FOREIGN KEY (sender_id) REFERENCES users (id),
 	FOREIGN KEY (receiver_id) REFERENCES users (id)
+	);`
+
+	_, err = s.db.Exec(query)
+	if err != nil {
+		return err
+	}
+
+	// payment_requests table
+	query = `CREATE TABLE IF NOT EXISTS payment_requests (
+	id TEXT PRIMARY KEY,
+	requester_id TEXT,
+	payer_id TEXT,
+	status TEXT,
+	created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+	FOREIGN KEY (requester_id) REFERENCES users (id),
+	FOREIGN KEY (payer_id) REFERENCES users (id)
 	);`
 
 	_, err = s.db.Exec(query)
@@ -136,23 +160,23 @@ func (s *Store) createTables() error {
 	return nil
 }
 
-func (s *Store) CreateUser(u *models.User) error {
+func (s *Store) CreateUser(user *models.User) error {
 	query := `
 	INSERT INTO users 
 	(id, name, email, phone_number, balance, credit_score, credit_limit) 
 	VALUES (?, ?, ?, ?, ?, ?, ?);`
 
-	_, err := s.db.Exec(query, u.ID, u.Name, u.Email, u.PhoneNumber, u.Balance, u.CreditScore, u.CreditLimit)
+	_, err := s.db.Exec(query, user.ID, user.Name, user.Email, user.PhoneNumber, user.Balance, user.CreditScore, user.CreditLimit)
 	return err
 }
 
-func (s *Store) GetUser(id string) (*models.User, error) {
+func (s *Store) GetUser(userID string) (*models.User, error) {
 	query := `
 	SELECT id, name, email, phone_number, balance, credit_score, credit_limit, created_at 
 	FROM users 
 	WHERE id = ?;`
 
-	row := s.db.QueryRow(query, id)
+	row := s.db.QueryRow(query, userID)
 
 	var u models.User
 
@@ -193,9 +217,8 @@ func (s *Store) ListUsers() ([]*models.User, error) {
 	}
 	return users, nil
 }
-}
 
-func (s *Store) Pay(p *models.Payment) error {
+func (s *Store) Pay(payment *models.Payment) error {
 	transaction, err := s.db.Begin()
 	if err != nil {
 		return err
@@ -210,7 +233,7 @@ func (s *Store) Pay(p *models.Payment) error {
 	SET balance = balance - ? 
 	WHERE id = ?;`
 
-	_, err = transaction.Exec(query, p.Amount, p.SenderID)
+	_, err = transaction.Exec(query, payment.Amount, payment.SenderID)
 	if err != nil {
 		return err
 	}
@@ -221,7 +244,7 @@ func (s *Store) Pay(p *models.Payment) error {
 	SET balance = balance + ? 
 	WHERE id = ?;`
 
-	_, err = transaction.Exec(query, p.TotalAmount, p.ReceiverID)
+	_, err = transaction.Exec(query, payment.TotalAmount, payment.ReceiverID)
 	if err != nil {
 		return err
 	}
@@ -232,7 +255,7 @@ func (s *Store) Pay(p *models.Payment) error {
 	(id, sender_id, receiver_id, amount, total_amount, note, payment_type, total_installments, status)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`
 
-	_, err = transaction.Exec(query, p.ID, p.SenderID, p.ReceiverID, p.Amount, p.TotalAmount, p.Note, p.PaymentType, p.TotalInstallments, p.Status)
+	_, err = transaction.Exec(query, payment.ID, payment.SenderID, payment.ReceiverID, payment.Amount, payment.TotalAmount, payment.Note, payment.PaymentType, payment.TotalInstallments, payment.Status)
 
 	if err != nil {
 		return err
@@ -241,18 +264,18 @@ func (s *Store) Pay(p *models.Payment) error {
 	return transaction.Commit()
 }
 
-func (s *Store) CreateBNPLLoan(p *models.Payment) error {
+func (s *Store) CreateBNPLLoan(payment *models.Payment) error {
 	if p.TotalInstallments == 0 {
 		return fmt.Errorf("Total installments cannot be zero")
 	}
 
 	// Variable for the raw price before fees
-	itemPrice := p.TotalAmount
+	itemPrice := payment.TotalAmount
 
 	var feeRate float64 = 0.00
 	// Calculate the risk fee based on their credit health score iff they are paying over time
-	if p.TotalInstallments > 1 {
-		sender, err := s.GetUser(p.SenderID)
+	if payment.TotalInstallments > 1 {
+		sender, err := s.GetUser(payment.SenderID)
 		if err != nil {
 			return fmt.Errorf("Failed to fetch sender metrics: %v", err)
 		}
@@ -262,16 +285,16 @@ func (s *Store) CreateBNPLLoan(p *models.Payment) error {
 	// Update the senders purchase amount by the fee rate
 	totalDebt := itemPrice + (feeRate * itemPrice)
 
-	baseAmount := math.Floor((totalDebt/float64(p.TotalInstallments))*100) / 100
+	baseAmount := math.Floor((totalDebt/float64(payment.TotalInstallments))*100) / 100
 
 	// Calculate the leftover pennies to add to initial installment
-	remainder := totalDebt - (baseAmount * float64(p.TotalInstallments))
+	remainder := totalDebt - (baseAmount * float64(payment.TotalInstallments))
 
 	// The app treasury pays the seller the full item price immediately
 	fundingPayment := &models.Payment{
-		ID:                fmt.Sprintf("fund_%s", p.ID),
+		ID:                fmt.Sprintf("fund_%s", payment.ID),
 		SenderID:          "app_treasury",
-		ReceiverID:        p.ReceiverID,
+		ReceiverID:        payment.ReceiverID,
 		Amount:            itemPrice,
 		TotalAmount:       itemPrice,
 		PaymentType:       "treasury_funding",
@@ -286,13 +309,13 @@ func (s *Store) CreateBNPLLoan(p *models.Payment) error {
 	}
 
 	// Charge the buyer their upfront down payment back to the app treasury
-	p.Amount = baseAmount + remainder
-	p.TotalAmount = totalDebt
-	p.ReceiverID = "app_treasury"
-	p.PaymentType = "installment"
+	payment.Amount = baseAmount + remainder
+	payment.TotalAmount = totalDebt
+	payment.ReceiverID = "app_treasury"
+	payment.PaymentType = "installment"
 
 	// Trigger the ledger execution
-	err = s.Pay(p)
+	err = s.Pay(payment)
 	if err != nil {
 		return fmt.Errorf("Upfront payment failed: %v", err)
 	}
@@ -321,7 +344,7 @@ func (s *Store) CreateBNPLLoan(p *models.Payment) error {
 		}
 
 		// Generate a structured identifier for each installment row
-		installmentID := fmt.Sprintf("inst_%s_%d", p.ID, i)
+		installmentID := fmt.Sprintf("inst_%s_%d", payment.ID, i)
 
 		isPaidInt := 0
 		if isPaid {
@@ -332,7 +355,7 @@ func (s *Store) CreateBNPLLoan(p *models.Payment) error {
 		INSERT INTO installments 
 		(id, payment_id, user_id, amount, due_date, is_paid)
 		VALUES (?,?,?,?,?,?);`
-		_, err = s.db.Exec(query, installmentID, p.ID, p.SenderID, installmentAmount, dueDate.Format("2006-01-02"), isPaidInt)
+		_, err = s.db.Exec(query, installmentID, payment.ID, payment.SenderID, installmentAmount, dueDate.Format("2006-01-02"), isPaidInt)
 		if err != nil {
 			return fmt.Errorf("Failed to save installment %d: %v", i, err)
 		}
@@ -354,29 +377,29 @@ func (s *Store) CalculateFeeRate(creditScore uint8) float64 {
 }
 
 // ************************************************
-// *************** SOCIAL FUNCTIONS ***************
+// *************** SOCIAL FEATURES ****************
 // ************************************************
 
-func (s *Store) SendFriendRequest(RequestID, SenderID, ReceiverID string) error {
+func (s *Store) SendFriendRequest(request *models.FriendRequest) error {
 	query := `
 	INSERT INTO into friend_requests 
 	(request_id, sender_id, receiver_id)
 	VALUES (?,?,?);`
 
-	_, err := s.db.Exec(query, RequestID, SenderID, ReceiverID)
+	_, err := s.db.Exec(query, request.ID, request.SenderID, request.ReceiverID)
 	if err != nil {
 		return fmt.Errorf("Unable to process the friend request %v", err)
 	}
 	return nil
 }
 
-func (s *Store) ListIncomingFriendRequests(u models.User) ([]*models.FriendRequest, error) {
+func (s *Store) ListIncomingFriendRequests(userID string) ([]*models.FriendRequest, error) {
 	query := `
 	SELECT sender_id, receiver_id, accepted, created_at
 	FROM friend_requests
 	WHERE receiver_id = ? AND accepted = 0;`
 
-	rows, err := s.db.Query(query, u.ID)
+	rows, err := s.db.Query(query, userID)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to retrieve user's incoming friend requests: %v", err)
 	}
@@ -392,7 +415,7 @@ func (s *Store) ListIncomingFriendRequests(u models.User) ([]*models.FriendReque
 		}
 		requests = append(requests, &r)
 	}
-	
+
 	// Check for errors encountered during iteration
 	if err = rows.Err(); err != nil {
 		return nil, err
@@ -400,7 +423,7 @@ func (s *Store) ListIncomingFriendRequests(u models.User) ([]*models.FriendReque
 	return requests, nil
 }
 
-func (s *Store) AcceptFriendRequest(r models.FriendRequest) error {
+func (s *Store) AcceptFriendRequest(requestID, senderID, receiverID string) error {
 	transaction, err := s.db.Begin()
 	if err != nil {
 		return err
@@ -413,7 +436,7 @@ func (s *Store) AcceptFriendRequest(r models.FriendRequest) error {
 	SET accepted = 1 
 	WHERE id = ?;`
 
-	_, err = transaction.Exec(query, r.ID)
+	_, err = transaction.Exec(query, requestID)
 	if err != nil {
 		return err
 	}
@@ -424,34 +447,70 @@ func (s *Store) AcceptFriendRequest(r models.FriendRequest) error {
 	INSERT OR IGNORE INTO friends 
 	VALUES (?1,?2), (?2,?1);`
 
-	_, err = transaction.Exec(query, r.SenderID, r.ReceiverID)
+	_, err = transaction.Exec(query, senderID, receiverID)
 	if err != nil {
 		return err
 	}
 	return transaction.Commit()
 }
 
-func (s *Store) DeclineFriendRequest(r models.FriendRequest) error {
+func (s *Store) DeclineFriendRequest(requestID string) error {
 	query := `
 	DELETE FROM friend_requests
 	WHERE id = ?;`
 
-	_, err := s.db.Exec(query, r.ID)
+	_, err := s.db.Exec(query, requestID)
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func (s *Store) RemoveFriendMutual(u1 models.User, u2 models.User) error {
+func (s *Store) RemoveFriendMutual(userID, friendID string) error {
 	query := `
 	DELETE FROM friends
 	WHERE (user_id = ?1 AND friend_id = ?2) OR (user_id = ?2 AND friend_id = ?1);`
 
-	_, err := s.db.Exec(query, u1.ID, u2.ID)
+	_, err := s.db.Exec(query, userID, friendID)
 	if err != nil {
 		return err
 	}
-
+	return nil
 }
 
+func (s *Store) ListFriends(userID string) ([]*models.Profile, error) {
+	// Look up all friends of the current user and use the friend ids to return their profile
+	query := `
+	SELECT u.id, u.name, u.email, u.phone_number
+	FROM friends AS fr
+	JOIN users AS u ON fr.friend_id = u.id
+	WHERE fr.user_id = ?;`
+
+	rows, err := s.db.Query(query, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var friends []*models.Profile
+
+	for rows.Next() {
+		var f models.Profile
+
+		err := rows.Scan(&f.ID, &f.Name, &f.Email, &f.PhoneNumber)
+		if err != nil {
+			return nil, err
+		}
+		friends = append(friends, &f)
+	}
+
+	// Check for errors encountered during iteration
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	return friends, nil
+}
+
+func (s *Store) CreatePaymentRequest(request *models.PaymentRequest) {
+	
+}

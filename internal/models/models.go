@@ -11,6 +11,13 @@ type User struct {
 	CreatedAt   string  `json:"created_at"`
 }
 
+type Profile struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Email       string `json:"email"`
+	PhoneNumber string `json:"phone_number"`
+}
+
 type Payment struct {
 	ID                string  `json:"id"`
 	SenderID          string  `json:"sender_id"`
@@ -22,6 +29,16 @@ type Payment struct {
 	TotalInstallments uint8   `json:"total_installments"`
 	Status            string  `json:"status"`
 	CreatedAt         string  `json:"created_at"`
+}
+
+type PaymentRequest struct {
+	ID          string  `json:"id"`
+	RequesterID string  `json:"requester_id"`
+	PayerID     string  `json:"payer_id"`
+	Amount      float64 `json:"amount"`
+	Note        string  `json:"note"`
+	Status      string  `json:"status"`
+	CreatedAt   string  `json:"created_at"`
 }
 
 type Installment struct {
