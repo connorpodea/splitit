@@ -200,14 +200,15 @@ func (s *Store) CreateBNPLLoan(p *models.Payment) error {
 	// Variable for the raw price before fees
 	itemPrice := p.TotalAmount
 
-	// Check the senders credit metrics
-	sender, err := s.GetUser(p.SenderID)
-	if err != nil {
-		return fmt.Errorf("Failed to fetch sender metrics: %v", err)
+	var feeRate float64 = 0.00
+	// Calculate the risk fee based on their credit health score iff they are paying over time
+	if p.TotalInstallments > 1 {
+		sender, err := s.GetUser(p.SenderID)
+		if err != nil {
+			return fmt.Errorf("Failed to fetch sender metrics: %v", err)
+		}
+		feeRate = s.CalculateFeeRate(sender.CreditScore)
 	}
-
-	// Calculate the risk fee based on their credit health score
-	feeRate := s.CalculateFeeRate(sender.CreditScore)
 
 	// Update the senders purchase amount by the fee rate
 	totalDebt := itemPrice + (feeRate * itemPrice)
@@ -229,7 +230,8 @@ func (s *Store) CreateBNPLLoan(p *models.Payment) error {
 		Status:            "completed",
 		Note:              fmt.Sprintf("Treasury funded purchase for payment %s", p.ID),
 	}
-	err = s.Pay(fundingPayment)
+
+	err := s.Pay(fundingPayment)
 	if err != nil {
 		return fmt.Errorf("Treasure merchant funding failed: %v", err)
 	}
@@ -291,11 +293,11 @@ func (s *Store) CreateBNPLLoan(p *models.Payment) error {
 func (s *Store) CalculateFeeRate(creditScore uint8) float64 {
 	switch {
 	case creditScore >= 90:
-		return 0.00
-	case creditScore >= 75:
 		return 0.01
-	case creditScore >= 50:
+	case creditScore >= 75:
 		return 0.02
+	case creditScore >= 50:
+		return 0.03
 	default:
 		return 0.07
 	}
