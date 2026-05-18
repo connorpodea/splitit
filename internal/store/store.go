@@ -185,7 +185,7 @@ func (s *Store) GetUser(userID string) (*models.User, error) {
 		return nil, err
 	}
 
-	return &u, nil
+	return &user, nil
 }
 
 func (s *Store) GetProfile(id string) (*models.Profile, error) {
