@@ -187,7 +187,12 @@ func (s *Store) ListUsers() ([]*models.User, error) {
 
 		users = append(users, &u)
 	}
+	// Check for errors encountered during iteration
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
 	return users, nil
+}
 }
 
 func (s *Store) Pay(p *models.Payment) error {
@@ -326,7 +331,7 @@ func (s *Store) CreateBNPLLoan(p *models.Payment) error {
 		query := `
 		INSERT INTO installments 
 		(id, payment_id, user_id, amount, due_date, is_paid)
-		VALUES (?,?,?,?,?,?)`
+		VALUES (?,?,?,?,?,?);`
 		_, err = s.db.Exec(query, installmentID, p.ID, p.SenderID, installmentAmount, dueDate.Format("2006-01-02"), isPaidInt)
 		if err != nil {
 			return fmt.Errorf("Failed to save installment %d: %v", i, err)
@@ -352,12 +357,11 @@ func (s *Store) CalculateFeeRate(creditScore uint8) float64 {
 // *************** SOCIAL FUNCTIONS ***************
 // ************************************************
 
-// ****** must add a friend request table ******
 func (s *Store) SendFriendRequest(RequestID, SenderID, ReceiverID string) error {
 	query := `
-	INSERT ROW into friend_requests 
-	(request_id, sender_id, receiver_id, accepted)
-	VALUES (?,?,?,?)`
+	INSERT INTO into friend_requests 
+	(request_id, sender_id, receiver_id)
+	VALUES (?,?,?);`
 
 	_, err := s.db.Exec(query, RequestID, SenderID, ReceiverID)
 	if err != nil {
@@ -368,9 +372,9 @@ func (s *Store) SendFriendRequest(RequestID, SenderID, ReceiverID string) error 
 
 func (s *Store) ListIncomingFriendRequests(u models.User) ([]*models.FriendRequest, error) {
 	query := `
-	SELECT sender_id 
+	SELECT sender_id, receiver_id, accepted, created_at
 	FROM friend_requests
-	WHERE receiver_id = ?`
+	WHERE receiver_id = ? AND accepted = 0;`
 
 	rows, err := s.db.Query(query, u.ID)
 	if err != nil {
@@ -382,11 +386,16 @@ func (s *Store) ListIncomingFriendRequests(u models.User) ([]*models.FriendReque
 	var requests []*models.FriendRequest
 	for rows.Next() {
 		var r models.FriendRequest
-		err := rows.Scan(&r.ID, &r.SenderID, &r.ReceiverID, &r.CreatedAt)
+		err := rows.Scan(&r.ID, &r.SenderID, &r.ReceiverID, &r.Accepted, &r.CreatedAt)
 		if err != nil {
 			return nil, err
 		}
 		requests = append(requests, &r)
+	}
+	
+	// Check for errors encountered during iteration
+	if err = rows.Err(); err != nil {
+		return nil, err
 	}
 	return requests, nil
 }
@@ -402,13 +411,47 @@ func (s *Store) AcceptFriendRequest(r models.FriendRequest) error {
 	query := `
 	UPDATE friend_requests 
 	SET accepted = 1 
-	WHERE id = ?`
+	WHERE id = ?;`
 
-	_, err = s.db.Exec(query, r.ID)
+	_, err = transaction.Exec(query, r.ID)
 	if err != nil {
 		return err
 	}
 
 	// update the friends table to show the new relationship
-	query = ``
+	// (for both users, ie user A is friends with user B, and user B is friends with user A)
+	query = `
+	INSERT OR IGNORE INTO friends 
+	VALUES (?1,?2), (?2,?1);`
+
+	_, err = transaction.Exec(query, r.SenderID, r.ReceiverID)
+	if err != nil {
+		return err
+	}
+	return transaction.Commit()
 }
+
+func (s *Store) DeclineFriendRequest(r models.FriendRequest) error {
+	query := `
+	DELETE FROM friend_requests
+	WHERE id = ?;`
+
+	_, err := s.db.Exec(query, r.ID)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *Store) RemoveFriendMutual(u1 models.User, u2 models.User) error {
+	query := `
+	DELETE FROM friends
+	WHERE (user_id = ?1 AND friend_id = ?2) OR (user_id = ?2 AND friend_id = ?1);`
+
+	_, err := s.db.Exec(query, u1.ID, u2.ID)
+	if err != nil {
+		return err
+	}
+
+}
+
