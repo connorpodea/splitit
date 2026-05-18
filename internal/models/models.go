@@ -16,6 +16,7 @@ type Profile struct {
 	Name        string `json:"name"`
 	Email       string `json:"email"`
 	PhoneNumber string `json:"phone_number"`
+	CreatedAt   string `json:"created_at"`
 }
 
 type Payment struct {

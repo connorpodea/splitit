@@ -132,6 +132,7 @@ func (s *Store) createTables() error {
 	user_id TEXT,
 	friend_id TEXT,
 	PRIMARY KEY (user_id, friend_id),
+	created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 	FOREIGN KEY (user_id) references users (id),
 	FOREIGN KEY (friend_id) references users (id)
 	);`
@@ -177,17 +178,29 @@ func (s *Store) GetUser(userID string) (*models.User, error) {
 	SELECT id, name, email, phone_number, balance, credit_score, credit_limit, created_at 
 	FROM users 
 	WHERE id = ?;`
+	var user models.User
 
-	row := s.db.QueryRow(query, userID)
-
-	var u models.User
-
-	err := row.Scan(&u.ID, &u.Name, &u.Email, &u.PhoneNumber, &u.Balance, &u.CreditScore, &u.CreditLimit, &u.CreatedAt)
+	err := s.db.QueryRow(query, userID).Scan(&user.ID, &user.Name, &user.Email, &user.PhoneNumber, &user.Balance, &user.CreditScore, &user.CreditLimit, &user.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
 
 	return &u, nil
+}
+
+func (s *Store) GetProfile(id string) (*models.Profile, error) {
+	query := `
+	SELECT id, name, email, phone_number, created_at 
+	FROM users 
+	WHERE id = ?;`
+	var profile models.Profile
+
+	err := s.db.QueryRow(query, id).Scan(&profile.ID, &profile.Name, &profile.Email, &profile.PhoneNumber, &profile.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+
+	return &profile, err
 }
 
 func (s *Store) ListUsers() ([]*models.User, error) {
@@ -218,6 +231,36 @@ func (s *Store) ListUsers() ([]*models.User, error) {
 		return nil, err
 	}
 	return users, nil
+}
+
+func (s *Store) ListProfiles() ([]*models.Profile, error) {
+	query := `
+	SELECT id, name, email, phone_number, created_at
+	FROM users;`
+
+	rows, err := s.db.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to list all users: %v", err)
+	}
+	defer rows.Close()
+
+	var profiles []*models.Profile
+
+	for rows.Next() {
+		var profile models.Profile
+
+		err := rows.Scan(&profile.ID, &profile.Name, &profile.Email, &profile.PhoneNumber, &profile.CreatedAt)
+		if err != nil {
+			return nil, err
+		}
+
+		profiles = append(profiles, &profile)
+	}
+	// Check for errors encountered during iteration
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	return profiles, nil
 }
 
 func (s *Store) Pay(payment *models.Payment) error {
@@ -341,8 +384,8 @@ func (s *Store) CreateBNPLLoan(payment *models.Payment) error {
 		} else {
 			installmentAmount = baseAmount
 			isPaid = false
-			// Stagger deadlines by 14 days multiplies by the installment index
-			dueDate = currentTime.AddDate(0, 0, int(i-1)*14)
+			// Stagger deadlines by 7 days multiplies by the installment index
+			dueDate = currentTime.AddDate(0, 0, int(i-1)*7)
 		}
 
 		// Generate a structured identifier for each installment row
@@ -439,8 +482,7 @@ func (s *Store) AcceptFriendRequest(requestID, senderID, receiverID string) erro
 
 	// update the friend requests table
 	query := `
-	UPDATE friend_requests 
-	SET accepted = 1 
+	DELETE FROM friend_requests
 	WHERE id = ?;`
 
 	_, err = transaction.Exec(query, requestID)
@@ -451,7 +493,8 @@ func (s *Store) AcceptFriendRequest(requestID, senderID, receiverID string) erro
 	// update the friends table to show the new relationship
 	// (for both users, ie user A is friends with user B, and user B is friends with user A)
 	query = `
-	INSERT OR IGNORE INTO friends 
+	INSERT OR IGNORE INTO friends
+	(user_id, friend_id)
 	VALUES (?1,?2), (?2,?1);`
 
 	_, err = transaction.Exec(query, senderID, receiverID)
@@ -486,9 +529,9 @@ func (s *Store) RemoveFriendMutual(userID, friendID string) error {
 }
 
 func (s *Store) ListFriends(userID string) ([]*models.Profile, error) {
-	// Look up all friends of the current user and use the friend ids to return their profile
+	// Look up all friends of the current user and use the friends' IDs to return their profile
 	query := `
-	SELECT u.id, u.name, u.email, u.phone_number
+	SELECT u.id, u.name, u.email, u.phone_number, u.created_at
 	FROM friends AS fr
 	JOIN users AS u ON fr.friend_id = u.id
 	WHERE fr.user_id = ?;`
@@ -502,13 +545,13 @@ func (s *Store) ListFriends(userID string) ([]*models.Profile, error) {
 	var friends []*models.Profile
 
 	for rows.Next() {
-		var f models.Profile
+		var friend models.Profile
 
-		err := rows.Scan(&f.ID, &f.Name, &f.Email, &f.PhoneNumber)
+		err := rows.Scan(&friend.ID, &friend.Name, &friend.Email, &friend.PhoneNumber, &friend.CreatedAt)
 		if err != nil {
 			return nil, err
 		}
-		friends = append(friends, &f)
+		friends = append(friends, &friend)
 	}
 
 	// Check for errors encountered during iteration
@@ -521,10 +564,10 @@ func (s *Store) ListFriends(userID string) ([]*models.Profile, error) {
 func (s *Store) CreatePaymentRequest(request *models.PaymentRequest) error {
 	query := `
 	INSERT INTO payment_requests
-	(id, requester_id, payer_id, amount, note, status, created_at)
-	VALUES (?,?,?,?,?,?,?);`
+	(id, requester_id, payer_id, amount, note, status)
+	VALUES (?,?,?,?,?,?);`
 
-	_, err := s.db.Exec(query, request.ID, request.RequesterID, request.PayerID, request.Amount, request.Note, request.Status, request.CreatedAt)
+	_, err := s.db.Exec(query, request.ID, request.RequesterID, request.PayerID, request.Amount, request.Note, request.Status)
 	if err != nil {
 		return err
 	}
