@@ -31,4 +31,13 @@ type Installment struct {
 	Amount       float64 `json:"amount"`
 	DueDate      string  `json:"due_date"`
 	IsPaid       bool    `json:"is_paid"`
+	CreatedAt    string  `json:"created_at"`
+}
+
+type FriendRequest struct {
+	ID         string `json:"id"`
+	SenderID   string `json:"sender_id"`
+	ReceiverID string `json:"receiver_id"`
+	Status     string `json:"status"`
+	CreatedAt  string `json:"created_at"`
 }

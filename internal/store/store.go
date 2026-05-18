@@ -88,8 +88,26 @@ func (s *Store) createTables() error {
 	amount REAL,
 	due_date TEXT,
 	is_paid INTEGER DEFAULT 0,
+	created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 	FOREIGN KEY (payment_id) REFERENCES payments (id),
 	FOREIGN KEY (user_id) REFERENCES users (id)
+	);`
+
+	_, err = s.db.Exec(query)
+	if err != nil {
+		return err
+	}
+
+	// friends table
+	// FOREIGN KEY's ensure that the users exist within the database
+	// PRIMARY KEY ensures that friendships cannot duplicate
+	query = `
+	CREATE TABLE IF NOT EXISTS friends (
+	user_id TEXT,
+	friend_id TEXT,
+	PRIMARY KEY (user_id, friend_id),
+	FOREIGN KEY (user_id) references users (id),
+	FOREIGN KEY (friend_id) references users (id)
 	);`
 
 	_, err = s.db.Exec(query)
@@ -102,8 +120,8 @@ func (s *Store) createTables() error {
 
 func (s *Store) CreateUser(u *models.User) error {
 	query := `
-INSERT INTO users (id, name, email, phone_number, balance, credit_score, credit_limit) 
-VALUES (?, ?, ?, ?, ?, ?, ?);`
+	INSERT INTO users (id, name, email, phone_number, balance, credit_score, credit_limit) 
+	VALUES (?, ?, ?, ?, ?, ?, ?);`
 
 	_, err := s.db.Exec(query, u.ID, u.Name, u.Email, u.PhoneNumber, u.Balance, u.CreditScore, u.CreditLimit)
 	return err
@@ -134,9 +152,8 @@ func (s *Store) ListUsers() ([]*models.User, error) {
 
 	rows, err := s.db.Query(query)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("Failed to list all users: %v", err)
 	}
-
 	defer rows.Close()
 
 	var users []*models.User
@@ -221,8 +238,8 @@ func (s *Store) CreateBNPLLoan(p *models.Payment) error {
 	// The app treasury pays the seller the full item price immediately
 	fundingPayment := &models.Payment{
 		ID:                fmt.Sprintf("fund_%s", p.ID),
-		SenderID:          "app_treasury", // Your app pools the capital
-		ReceiverID:        p.ReceiverID,   // The seller receives it
+		SenderID:          "app_treasury",
+		ReceiverID:        p.ReceiverID,
 		Amount:            itemPrice,
 		TotalAmount:       itemPrice,
 		PaymentType:       "treasury_funding",
@@ -281,7 +298,6 @@ func (s *Store) CreateBNPLLoan(p *models.Payment) error {
 
 		query := `INSERT INTO installments (id, payment_id, user_id, amount, due_date, is_paid)
 		VALUES (?,?,?,?,?,?)`
-
 		_, err = s.db.Exec(query, installmentID, p.ID, p.SenderID, installmentAmount, dueDate.Format("2006-01-02"), isPaidInt)
 		if err != nil {
 			return fmt.Errorf("Failed to save installment %d: %v", i, err)
@@ -302,3 +318,44 @@ func (s *Store) CalculateFeeRate(creditScore uint8) float64 {
 		return 0.07
 	}
 }
+
+// ************************************************
+// *************** SOCIAL FUNCTIONS ***************
+// ************************************************
+
+// ****** must add a friend request table ******
+func (s *Store) SendFriendRequest(RequestID, SenderID, ReceiverID string) error {
+	query := `
+	INSERT ROW into friend_requests (request_id, sender_id, receiver_id, status)
+	VALUES (?,?,?,?)`
+
+	_, err := s.db.Exec(query, RequestID, SenderID, ReceiverID)
+	if err != nil {
+		return fmt.Errorf("Unable to process the friend request %v", err)
+	}
+	return nil
+}
+
+func (s *Store) ListIncomingFriendRequests(u models.User) ([]*models.FriendRequest, error) {
+	query := `SELECT sender_id FROM friend_requests
+	WHERE receiver_id = ?`
+
+	rows, err := s.db.Query(query, u.ID)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to retrieve user's incoming friend requests: %v", err)
+	}
+	defer rows.Close()
+
+	// collect a list of all the requests
+	var requests []*models.FriendRequest
+	for rows.Next() {
+		var r models.FriendRequest
+		err := rows.Scan(&r.ID, &r.SenderID, &r.ReceiverID, &r.CreatedAt)
+		if err != nil {
+			return nil, err
+		}
+		requests = append(requests, &u)
+	}
+	return requests, nil
+}
+
