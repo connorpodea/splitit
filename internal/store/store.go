@@ -115,12 +115,31 @@ func (s *Store) createTables() error {
 		return err
 	}
 
+	// friend requests table
+	// FOREIGN KEY's ensure that the users exist within the database
+	query = `
+	CREATE TABLE IF NOT EXISTS friend_requests (
+	id TEXT PRIMARY KEY,
+	sender_id TEXT,
+	receiver_id TEXT,
+	accepted INTEGER DEFAULT 0,
+	created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+	FOREIGN KEY (sender_id) REFERENCES users (id),
+	FOREIGN KEY (receiver_id) REFERENCES users (id)
+	)`
+
+	_, err = s.db.Exec(query)
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
 func (s *Store) CreateUser(u *models.User) error {
 	query := `
-	INSERT INTO users (id, name, email, phone_number, balance, credit_score, credit_limit) 
+	INSERT INTO users 
+	(id, name, email, phone_number, balance, credit_score, credit_limit) 
 	VALUES (?, ?, ?, ?, ?, ?, ?);`
 
 	_, err := s.db.Exec(query, u.ID, u.Name, u.Email, u.PhoneNumber, u.Balance, u.CreditScore, u.CreditLimit)
@@ -181,7 +200,10 @@ func (s *Store) Pay(p *models.Payment) error {
 	defer transaction.Rollback()
 
 	// Update the senders balance to deduct the upfront payment
-	query := `UPDATE users SET balance = balance - ? WHERE id = ?;`
+	query := `
+	UPDATE users 
+	SET balance = balance - ? 
+	WHERE id = ?;`
 
 	_, err = transaction.Exec(query, p.Amount, p.SenderID)
 	if err != nil {
@@ -189,7 +211,10 @@ func (s *Store) Pay(p *models.Payment) error {
 	}
 
 	// Update receivers balance to receive the total payment
-	query = `UPDATE users SET balance = balance + ? WHERE id = ?;`
+	query = `
+	UPDATE users 
+	SET balance = balance + ? 
+	WHERE id = ?;`
 
 	_, err = transaction.Exec(query, p.TotalAmount, p.ReceiverID)
 	if err != nil {
@@ -197,8 +222,10 @@ func (s *Store) Pay(p *models.Payment) error {
 	}
 
 	// Create a new row in the senders payment table
-	query = `INSERT INTO payments (id, sender_id, receiver_id, amount, total_amount, note, payment_type, total_installments, status) 
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`
+	query = `
+	INSERT INTO payments 
+	(id, sender_id, receiver_id, amount, total_amount, note, payment_type, total_installments, status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`
 
 	_, err = transaction.Exec(query, p.ID, p.SenderID, p.ReceiverID, p.Amount, p.TotalAmount, p.Note, p.PaymentType, p.TotalInstallments, p.Status)
 
@@ -296,7 +323,9 @@ func (s *Store) CreateBNPLLoan(p *models.Payment) error {
 			isPaidInt = 1
 		}
 
-		query := `INSERT INTO installments (id, payment_id, user_id, amount, due_date, is_paid)
+		query := `
+		INSERT INTO installments 
+		(id, payment_id, user_id, amount, due_date, is_paid)
 		VALUES (?,?,?,?,?,?)`
 		_, err = s.db.Exec(query, installmentID, p.ID, p.SenderID, installmentAmount, dueDate.Format("2006-01-02"), isPaidInt)
 		if err != nil {
@@ -326,7 +355,8 @@ func (s *Store) CalculateFeeRate(creditScore uint8) float64 {
 // ****** must add a friend request table ******
 func (s *Store) SendFriendRequest(RequestID, SenderID, ReceiverID string) error {
 	query := `
-	INSERT ROW into friend_requests (request_id, sender_id, receiver_id, status)
+	INSERT ROW into friend_requests 
+	(request_id, sender_id, receiver_id, accepted)
 	VALUES (?,?,?,?)`
 
 	_, err := s.db.Exec(query, RequestID, SenderID, ReceiverID)
@@ -337,7 +367,9 @@ func (s *Store) SendFriendRequest(RequestID, SenderID, ReceiverID string) error 
 }
 
 func (s *Store) ListIncomingFriendRequests(u models.User) ([]*models.FriendRequest, error) {
-	query := `SELECT sender_id FROM friend_requests
+	query := `
+	SELECT sender_id 
+	FROM friend_requests
 	WHERE receiver_id = ?`
 
 	rows, err := s.db.Query(query, u.ID)
@@ -354,8 +386,29 @@ func (s *Store) ListIncomingFriendRequests(u models.User) ([]*models.FriendReque
 		if err != nil {
 			return nil, err
 		}
-		requests = append(requests, &u)
+		requests = append(requests, &r)
 	}
 	return requests, nil
 }
 
+func (s *Store) AcceptFriendRequest(r models.FriendRequest) error {
+	transaction, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer transaction.Rollback()
+
+	// update the friend requests table
+	query := `
+	UPDATE friend_requests 
+	SET accepted = 1 
+	WHERE id = ?`
+
+	_, err = s.db.Exec(query, r.ID)
+	if err != nil {
+		return err
+	}
+
+	// update the friends table to show the new relationship
+	query = ``
+}
