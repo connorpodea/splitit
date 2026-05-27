@@ -270,9 +270,23 @@ func (s *Store) Pay(payment *models.Payment) error {
 	if err != nil {
 		return fmt.Errorf("ledger settlement aborted: failed to open transaction session context: %w", err)
 	}
-
 	// If the function exits early due to an error, discard all changes
 	defer transaction.Rollback()
+
+	// Block the sender from going into negative balance
+	var current_balance float64
+	balance_query := `
+	SELECT balance 
+	FROM users 
+	WHERE id = ?;`
+	err = transaction.QueryRow(balance_query, payment.SenderID).Scan(&current_balance)
+	if err != nil {
+		return fmt.Errorf("ledger settlement failed: unable to verify sender funds: %w", err)
+	}
+
+	if current_balance < payment.Amount {
+		return fmt.Errorf("ledger settlement rejected: insufficient liquid funds (ID: '%s' attempted to pay $%.2f but only has $%.2f)", payment.SenderID, payment.Amount, current_balance)
+	}
 
 	// Update the senders balance to deduct the upfront payment
 	query := `
@@ -340,7 +354,23 @@ func (s *Store) CreateBNPLLoan(payment *models.Payment) error {
 	// Calculate the leftover pennies to add to initial installment
 	remainder := totalDebt - (baseAmount * float64(payment.TotalInstallments))
 
-	// The app treasury pays the seller the full item price immediately
+	// Step 1: Insert the master loan record to preserve historical data integrity before any fund movements
+	// This anchors the loan in the payments table without touching balances directly
+	payment.TotalAmount = totalDebt
+	payment.Amount = itemPrice
+	payment.PaymentType = "bnpl_loan_master"
+
+	query := `
+	INSERT INTO payments
+	(id, sender_id, receiver_id, amount, total_amount, note, payment_type, total_installments, status)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`
+
+	_, err := s.db.Exec(query, payment.ID, payment.SenderID, payment.ReceiverID, payment.Amount, payment.TotalAmount, payment.Note, payment.PaymentType, payment.TotalInstallments, payment.Status)
+	if err != nil {
+		return fmt.Errorf("loan processing aborted: failed to anchor master loan record ID '%s' into payments ledger: %w", payment.ID, err)
+	}
+
+	// Step 2: Pay the Merchant — the app treasury injects the full item price to the seller immediately
 	fundingPayment := &models.Payment{
 		ID:                fmt.Sprintf("fund_%s", payment.ID),
 		SenderID:          "app_treasury",
@@ -353,27 +383,30 @@ func (s *Store) CreateBNPLLoan(payment *models.Payment) error {
 		Note:              fmt.Sprintf("Treasury funded purchase for payment %s", payment.ID),
 	}
 
-	err := s.Pay(fundingPayment)
+	err = s.Pay(fundingPayment)
 	if err != nil {
 		return fmt.Errorf("loan processing aborted: upfront treasury capital injection for merchant pool failed: %w", err)
 	}
 
-	// Charge the buyer their upfront down payment back to the app treasury
-	payment.Amount = baseAmount + remainder
-	payment.TotalAmount = totalDebt
-	payment.ReceiverID = "app_treasury"
-	payment.PaymentType = "installment"
+	// Step 3: Collect the Down Payment — pull the first installment from the buyer back to the app treasury
+	downPayment := &models.Payment{
+		ID:                fmt.Sprintf("down_%s", payment.ID),
+		SenderID:          payment.SenderID,
+		ReceiverID:        "app_treasury",
+		Amount:            baseAmount + remainder,
+		TotalAmount:       baseAmount + remainder,
+		PaymentType:       "installment",
+		TotalInstallments: 1,
+		Status:            "completed",
+		Note:              fmt.Sprintf("Down payment for loan %s", payment.ID),
+	}
 
-	// Trigger the ledger execution
-	err = s.Pay(payment)
+	err = s.Pay(downPayment)
 	if err != nil {
 		return fmt.Errorf("loan processing aborted: down payment collection extraction failed for buyer ID '%s': %w", payment.SenderID, err)
 	}
 
-	// Restore back to the total debt for the database installment records
-	payment.TotalAmount = itemPrice + (feeRate * itemPrice)
-
-	// Build the remaining debt calendar schedule into the installments table
+	// Step 4: Generate Installment Calendars — build the remaining debt schedule into the installments table
 	currentTime := time.Now()
 
 	for i := uint8(1); i <= payment.TotalInstallments; i++ {
@@ -382,14 +415,14 @@ func (s *Store) CreateBNPLLoan(payment *models.Payment) error {
 		var dueDate time.Time
 
 		if i == 1 {
-			// Installment 1 is paid upfront during s.Pay(p)
+			// Installment 1 is paid upfront during s.Pay(downPayment)
 			installmentAmount = baseAmount + remainder
 			isPaid = true
 			dueDate = currentTime
 		} else {
 			installmentAmount = baseAmount
 			isPaid = false
-			// Stagger deadlines by 7 days multiplies by the installment index
+			// Stagger deadlines by 7 days multiplied by the installment index
 			dueDate = currentTime.AddDate(0, 0, int(i-1)*7)
 		}
 
@@ -401,11 +434,11 @@ func (s *Store) CreateBNPLLoan(payment *models.Payment) error {
 			isPaidInt = 1
 		}
 
-		query := `
+		installmentQuery := `
 		INSERT INTO installments 
 		(id, payment_id, user_id, amount, due_date, is_paid)
 		VALUES (?,?,?,?,?,?);`
-		_, err = s.db.Exec(query, installmentID, payment.ID, payment.SenderID, installmentAmount, dueDate.Format("2006-01-02"), isPaidInt)
+		_, err = s.db.Exec(installmentQuery, installmentID, payment.ID, payment.SenderID, installmentAmount, dueDate.Format("2006-01-02"), isPaidInt)
 		if err != nil {
 			return fmt.Errorf("failed to save generated installment row segment %d for loan ID '%s' into database schedules: %w", i, payment.ID, err)
 		}
@@ -523,9 +556,9 @@ func (s *Store) AcceptFriendRequest(requestID, senderID, receiverID string) erro
 	query = `
 	INSERT OR IGNORE INTO friends
 	(user_id, friend_id)
-	VALUES (?,?), (?,?);`
+	VALUES (?1, ?2), (?2, ?1);`
 
-	_, err = transaction.Exec(query, senderID, receiverID, receiverID, senderID)
+	_, err = transaction.Exec(query, senderID, receiverID)
 	if err != nil {
 		return fmt.Errorf("friend request acceptance failed: failed to generate mutual peer-to-peer mapping intersection for user IDs '%s' and '%s': %w", senderID, receiverID, err)
 	}
@@ -608,7 +641,7 @@ func (s *Store) CreatePaymentRequest(request *models.PaymentRequest) error {
 
 func (s *Store) ListIncomingPaymentRequests(userID string) ([]*models.PaymentRequest, error) {
 	query := `
-	SELECT id, requester_id, payer_id, amount, note, status,created_at
+	SELECT id, requester_id, payer_id, amount, note, status, created_at
 	FROM payment_requests
 	WHERE payer_id = ? AND status = 'pending';`
 
@@ -641,7 +674,7 @@ func (s *Store) ListOutgoingPaymentRequests(userID string) ([]*models.PaymentReq
 	query := `
 	SELECT id, requester_id, payer_id, amount, note, status, created_at
 	FROM payment_requests
-	WHERE requester_id = ? AND STATUS = 'pending';`
+	WHERE requester_id = ? AND status = 'pending';`
 
 	rows, err := s.db.Query(query, userID)
 	if err != nil {
@@ -675,7 +708,7 @@ func (s *Store) UpdatePaymentRequestStatus(paymentID, new_status string) error {
 	SET status = ?
 	WHERE id = ?;`
 
-	_, err := s.db.Exec(query, paymentID, new_status)
+	_, err := s.db.Exec(query, new_status, paymentID)
 	if err != nil {
 		return fmt.Errorf("state machine error: failed to transition payment invoice request ID '%s' to state token '%s': %w", paymentID, new_status, err)
 	}
