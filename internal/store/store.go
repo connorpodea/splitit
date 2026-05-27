@@ -169,7 +169,10 @@ func (s *Store) CreateUser(user *models.User) error {
 	VALUES (?, ?, ?, ?, ?, ?, ?);`
 
 	_, err := s.db.Exec(query, user.ID, user.Name, user.Email, user.PhoneNumber, user.Balance, user.CreditScore, user.CreditLimit)
-	return err
+	if err != nil {
+		return fmt.Errorf("failed to write profile for user ID '%s' to database: %w", user.ID, err)
+	}
+	return nil
 }
 
 func (s *Store) GetUser(userID string) (*models.User, error) {
@@ -181,7 +184,7 @@ func (s *Store) GetUser(userID string) (*models.User, error) {
 
 	err := s.db.QueryRow(query, userID).Scan(&user.ID, &user.Name, &user.Email, &user.PhoneNumber, &user.Balance, &user.CreditScore, &user.CreditLimit, &user.CreatedAt)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to retrieve full account parameters for user ID '%s': %w", userID, err)
 	}
 
 	return &user, nil
@@ -196,10 +199,10 @@ func (s *Store) GetProfile(id string) (*models.Profile, error) {
 
 	err := s.db.QueryRow(query, id).Scan(&profile.ID, &profile.Name, &profile.Email, &profile.PhoneNumber, &profile.CreatedAt)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to pull minimalist public profile metadata for user ID '%s': %w", id, err)
 	}
 
-	return &profile, err
+	return &profile, nil
 }
 
 func (s *Store) ListUsers() ([]*models.User, error) {
@@ -209,7 +212,7 @@ func (s *Store) ListUsers() ([]*models.User, error) {
 
 	rows, err := s.db.Query(query)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to list all users: %v", err)
+		return nil, fmt.Errorf("failed to execute full users table scan lookup query: %w", err)
 	}
 	defer rows.Close()
 
@@ -220,14 +223,14 @@ func (s *Store) ListUsers() ([]*models.User, error) {
 
 		err := rows.Scan(&u.ID, &u.Name, &u.Email, &u.PhoneNumber, &u.Balance, &u.CreditScore, &u.CreditLimit, &u.CreatedAt)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to scan row into user data struct during list aggregation: %w", err)
 		}
 
 		users = append(users, &u)
 	}
 	// Check for errors encountered during iteration
 	if err = rows.Err(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("detected a mid-stream cursor failure during users rows iteration loop: %w", err)
 	}
 	return users, nil
 }
@@ -239,7 +242,7 @@ func (s *Store) ListProfiles() ([]*models.Profile, error) {
 
 	rows, err := s.db.Query(query)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to list all users: %v", err)
+		return nil, fmt.Errorf("failed to execute global public profiles query row collection: %w", err)
 	}
 	defer rows.Close()
 
@@ -250,14 +253,14 @@ func (s *Store) ListProfiles() ([]*models.Profile, error) {
 
 		err := rows.Scan(&profile.ID, &profile.Name, &profile.Email, &profile.PhoneNumber, &profile.CreatedAt)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to scan matching profile data mapping structure: %w", err)
 		}
 
 		profiles = append(profiles, &profile)
 	}
 	// Check for errors encountered during iteration
 	if err = rows.Err(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("detected a mid-stream cursor failure during profiles row iteration loop: %w", err)
 	}
 	return profiles, nil
 }
@@ -265,7 +268,7 @@ func (s *Store) ListProfiles() ([]*models.Profile, error) {
 func (s *Store) Pay(payment *models.Payment) error {
 	transaction, err := s.db.Begin()
 	if err != nil {
-		return err
+		return fmt.Errorf("ledger settlement aborted: failed to open transaction session context: %w", err)
 	}
 
 	// If the function exits early due to an error, discard all changes
@@ -279,7 +282,7 @@ func (s *Store) Pay(payment *models.Payment) error {
 
 	_, err = transaction.Exec(query, payment.Amount, payment.SenderID)
 	if err != nil {
-		return err
+		return fmt.Errorf("ledger settlement failed: unable to clear balance deduction of $%.2f from sender ID '%s': %w", payment.Amount, payment.SenderID, err)
 	}
 
 	// Update receivers balance to receive the total payment
@@ -290,7 +293,7 @@ func (s *Store) Pay(payment *models.Payment) error {
 
 	_, err = transaction.Exec(query, payment.TotalAmount, payment.ReceiverID)
 	if err != nil {
-		return err
+		return fmt.Errorf("ledger settlement failed: unable to credit balance allocation of $%.2f to receiver ID '%s': %w", payment.TotalAmount, payment.ReceiverID, err)
 	}
 
 	// Create a new row in the senders payment table
@@ -300,17 +303,20 @@ func (s *Store) Pay(payment *models.Payment) error {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`
 
 	_, err = transaction.Exec(query, payment.ID, payment.SenderID, payment.ReceiverID, payment.Amount, payment.TotalAmount, payment.Note, payment.PaymentType, payment.TotalInstallments, payment.Status)
-
 	if err != nil {
-		return err
+		return fmt.Errorf("ledger settlement failed: historical transaction entry creation with ID '%s' rejected by database: %w", payment.ID, err)
 	}
 
-	return transaction.Commit()
+	if err = transaction.Commit(); err != nil {
+		return fmt.Errorf("critical engine tracking mismatch: failed to write block modifications to disk on final commit sequence: %w", err)
+	}
+
+	return nil
 }
 
 func (s *Store) CreateBNPLLoan(payment *models.Payment) error {
 	if payment.TotalInstallments == 0 {
-		return fmt.Errorf("Total installments cannot be zero")
+		return fmt.Errorf("credit engine processing aborted: total plan financing installments cannot be evaluated at zero")
 	}
 
 	// Variable for the raw price before fees
@@ -321,7 +327,7 @@ func (s *Store) CreateBNPLLoan(payment *models.Payment) error {
 	if payment.TotalInstallments > 1 {
 		sender, err := s.GetUser(payment.SenderID)
 		if err != nil {
-			return fmt.Errorf("Failed to fetch sender metrics: %v", err)
+			return fmt.Errorf("credit engine evaluation rejected: failed to query credit profile for buyer ID '%s': %w", payment.SenderID, err)
 		}
 		feeRate = s.CalculateFeeRate(sender.CreditScore)
 	}
@@ -349,7 +355,7 @@ func (s *Store) CreateBNPLLoan(payment *models.Payment) error {
 
 	err := s.Pay(fundingPayment)
 	if err != nil {
-		return fmt.Errorf("Treasure merchant funding failed: %v", err)
+		return fmt.Errorf("loan processing aborted: upfront treasury capital injection for merchant pool failed: %w", err)
 	}
 
 	// Charge the buyer their upfront down payment back to the app treasury
@@ -361,7 +367,7 @@ func (s *Store) CreateBNPLLoan(payment *models.Payment) error {
 	// Trigger the ledger execution
 	err = s.Pay(payment)
 	if err != nil {
-		return fmt.Errorf("Upfront payment failed: %v", err)
+		return fmt.Errorf("loan processing aborted: down payment collection extraction failed for buyer ID '%s': %w", payment.SenderID, err)
 	}
 
 	// Restore back to the total debt for the database installment records
@@ -401,7 +407,7 @@ func (s *Store) CreateBNPLLoan(payment *models.Payment) error {
 		VALUES (?,?,?,?,?,?);`
 		_, err = s.db.Exec(query, installmentID, payment.ID, payment.SenderID, installmentAmount, dueDate.Format("2006-01-02"), isPaidInt)
 		if err != nil {
-			return fmt.Errorf("Failed to save installment %d: %v", i, err)
+			return fmt.Errorf("failed to save generated installment row segment %d for loan ID '%s' into database schedules: %w", i, payment.ID, err)
 		}
 	}
 	return nil
@@ -420,10 +426,6 @@ func (s *Store) CalculateFeeRate(creditScore uint8) float64 {
 	}
 }
 
-// ************************************************
-// *************** SOCIAL FEATURES ****************
-// ************************************************
-
 func (s *Store) SendFriendRequest(request *models.FriendRequest) error {
 	query := `
 	INSERT INTO friend_requests 
@@ -432,7 +434,7 @@ func (s *Store) SendFriendRequest(request *models.FriendRequest) error {
 
 	_, err := s.db.Exec(query, request.ID, request.SenderID, request.ReceiverID)
 	if err != nil {
-		return fmt.Errorf("Unable to process the friend request %v", err)
+		return fmt.Errorf("failed to insert pending relationship record for invitation request ID '%s': %w", request.ID, err)
 	}
 	return nil
 }
@@ -445,7 +447,7 @@ func (s *Store) ListIncomingFriendRequests(userID string) ([]*models.FriendReque
 
 	rows, err := s.db.Query(query, userID)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to retrieve user's incoming friend requests: %v", err)
+		return nil, fmt.Errorf("failed to query incoming friend requests directory for user ID '%s': %w", userID, err)
 	}
 	defer rows.Close()
 
@@ -453,29 +455,56 @@ func (s *Store) ListIncomingFriendRequests(userID string) ([]*models.FriendReque
 	var requests []*models.FriendRequest
 	for rows.Next() {
 		var r models.FriendRequest
+
 		err := rows.Scan(&r.ID, &r.SenderID, &r.ReceiverID, &r.CreatedAt)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to parse incoming connection record sequence into target friend request model: %w", err)
 		}
 		requests = append(requests, &r)
 	}
 
 	// Check for errors encountered during iteration
 	if err = rows.Err(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("detected cursor error processing user ID '%s' incoming network request tracking loop: %w", userID, err)
 	}
 	return requests, nil
 }
 
 func (s *Store) ListOutgoingFriendRequests(userID string) ([]*models.FriendRequest, error) {
-	// fill this out
-	return nil, nil
+	query := `
+	SELECT id, sender_id, receiver_id, created_at
+	FROM friend_requests
+	WHERE sender_id = ?;`
+
+	rows, err := s.db.Query(query, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query outbound tracking directory for user ID '%s': %w", userID, err)
+	}
+	defer rows.Close()
+
+	var requests []*models.FriendRequest
+
+	for rows.Next() {
+		var r models.FriendRequest
+
+		err = rows.Scan(&r.ID, &r.SenderID, &r.ReceiverID, &r.CreatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan matching outbound invitation row properties into model reference: %w", err)
+		}
+		requests = append(requests, &r)
+	}
+
+	// Check for errors encountered during iteration
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("detected cursor error processing user ID '%s' outgoing network request tracking loop: %w", userID, err)
+	}
+	return requests, nil
 }
 
 func (s *Store) AcceptFriendRequest(requestID, senderID, receiverID string) error {
 	transaction, err := s.db.Begin()
 	if err != nil {
-		return err
+		return fmt.Errorf("friend request acceptance aborted: failed to provision database transaction: %w", err)
 	}
 	defer transaction.Rollback()
 
@@ -486,7 +515,7 @@ func (s *Store) AcceptFriendRequest(requestID, senderID, receiverID string) erro
 
 	_, err = transaction.Exec(query, requestID)
 	if err != nil {
-		return err
+		return fmt.Errorf("friend request acceptance failed: unable to clear invitation record ID '%s': %w", requestID, err)
 	}
 
 	// update the friends table to show the new relationship
@@ -498,9 +527,13 @@ func (s *Store) AcceptFriendRequest(requestID, senderID, receiverID string) erro
 
 	_, err = transaction.Exec(query, senderID, receiverID)
 	if err != nil {
-		return err
+		return fmt.Errorf("friend request acceptance failed: failed to generate mutual peer-to-peer mapping intersection for user IDs '%s' and '%s': %w", senderID, receiverID, err)
 	}
-	return transaction.Commit()
+
+	if err = transaction.Commit(); err != nil {
+		return fmt.Errorf("friend request acceptance failed: database transaction failed to commit to disk: %w", err)
+	}
+	return nil
 }
 
 func (s *Store) DeclineFriendRequest(requestID string) error {
@@ -510,7 +543,7 @@ func (s *Store) DeclineFriendRequest(requestID string) error {
 
 	_, err := s.db.Exec(query, requestID)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to execute removal delete action on friend request ID '%s': %w", requestID, err)
 	}
 	return nil
 }
@@ -522,7 +555,7 @@ func (s *Store) RemoveFriendMutual(userID, friendID string) error {
 
 	_, err := s.db.Exec(query, userID, friendID)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to sever mutual bidirectional connection map matching user IDs '%s' and '%s': %w", userID, friendID, err)
 	}
 	return nil
 }
@@ -537,7 +570,7 @@ func (s *Store) ListFriends(userID string) ([]*models.Profile, error) {
 
 	rows, err := s.db.Query(query, userID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to evaluate network directory join mapping for user ID '%s': %w", userID, err)
 	}
 	defer rows.Close()
 
@@ -548,14 +581,14 @@ func (s *Store) ListFriends(userID string) ([]*models.Profile, error) {
 
 		err := rows.Scan(&friend.ID, &friend.Name, &friend.Email, &friend.PhoneNumber, &friend.CreatedAt)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to deserialize user profile attributes from friends table query data stream: %w", err)
 		}
 		friends = append(friends, &friend)
 	}
 
 	// Check for errors encountered during iteration
 	if err = rows.Err(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("detected structural cursor disruption within active user friends list scanner loop for ID '%s': %w", userID, err)
 	}
 	return friends, nil
 }
@@ -568,7 +601,7 @@ func (s *Store) CreatePaymentRequest(request *models.PaymentRequest) error {
 
 	_, err := s.db.Exec(query, request.ID, request.RequesterID, request.PayerID, request.Amount, request.Note, request.Status)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to push open payment demand requisition with invoice ID '%s' into table ledgers: %w", request.ID, err)
 	}
 	return nil
 }
@@ -581,7 +614,7 @@ func (s *Store) ListIncomingPaymentRequests(userID string) ([]*models.PaymentReq
 
 	rows, err := s.db.Query(query, userID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to look up outstanding pending payables collection dashboard records for user ID '%s': %w", userID, err)
 	}
 	defer rows.Close()
 
@@ -591,23 +624,49 @@ func (s *Store) ListIncomingPaymentRequests(userID string) ([]*models.PaymentReq
 		var r models.PaymentRequest
 
 		err = rows.Scan(&r.ID, &r.RequesterID, &r.PayerID, &r.Amount, &r.Note, &r.Status, &r.CreatedAt)
-
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to unpack invoice variables into internal payment request structure array: %w", err)
 		}
 		requests = append(requests, &r)
 	}
 
 	// Check for errors encountered during iteration
 	if err = rows.Err(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("detected an unexpected structural read failure inside payables pipeline engine iteration for user ID '%s': %w", userID, err)
 	}
 	return requests, nil
 }
 
 func (s *Store) ListOutgoingPaymentRequests(userID string) ([]*models.PaymentRequest, error) {
-	// fill this out
-	return nil, nil
+	query := `
+	SELECT id, requester_id, payer_id, amount, note, status, created_at, payer_id
+	FROM payment_requests
+	WHERE requester_id = ? AND STATUS = 'pending';`
+
+	rows, err := s.db.Query(query, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to look up outbound collectibles receivables list directory for user ID '%s': %w", userID, err)
+	}
+	defer rows.Close()
+
+	var requests []*models.PaymentRequest
+
+	for rows.Next() {
+		var r models.PaymentRequest
+
+		err = rows.Scan(&r.ID, &r.RequesterID, &r.PayerID, &r.Amount, &r.Note, &r.Status, &r.CreatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to map outbound record fields safely to target collection model fields: %w", err)
+		}
+
+		requests = append(requests, &r)
+	}
+
+	// Check for errors encountered during iteration
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("detected an unexpected structural read failure inside collectibles receivables pipeline iteration for user ID '%s': %w", userID, err)
+	}
+	return requests, nil
 }
 
 func (s *Store) UpdatePaymentRequestStatus(paymentID, new_status string) error {
@@ -618,7 +677,7 @@ func (s *Store) UpdatePaymentRequestStatus(paymentID, new_status string) error {
 
 	_, err := s.db.Exec(query, paymentID, new_status)
 	if err != nil {
-		return err
+		return fmt.Errorf("state machine error: failed to transition payment invoice request ID '%s' to state token '%s': %w", paymentID, new_status, err)
 	}
 	return nil
 }
