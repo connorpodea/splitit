@@ -131,8 +131,8 @@ func (s *Store) createTables() error {
 	CREATE TABLE IF NOT EXISTS friends (
 	user_id TEXT,
 	friend_id TEXT,
-	PRIMARY KEY (user_id, friend_id),
 	created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+	PRIMARY KEY (user_id, friend_id),
 	FOREIGN KEY (user_id) references users (id),
 	FOREIGN KEY (friend_id) references users (id)
 	);`
@@ -152,7 +152,7 @@ func (s *Store) createTables() error {
 	created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 	FOREIGN KEY (sender_id) REFERENCES users (id),
 	FOREIGN KEY (receiver_id) REFERENCES users (id)
-	)`
+	);`
 
 	_, err = s.db.Exec(query)
 	if err != nil {
@@ -523,9 +523,9 @@ func (s *Store) AcceptFriendRequest(requestID, senderID, receiverID string) erro
 	query = `
 	INSERT OR IGNORE INTO friends
 	(user_id, friend_id)
-	VALUES (?1,?2), (?2,?1);`
+	VALUES (?,?), (?,?);`
 
-	_, err = transaction.Exec(query, senderID, receiverID)
+	_, err = transaction.Exec(query, senderID, receiverID, receiverID, senderID)
 	if err != nil {
 		return fmt.Errorf("friend request acceptance failed: failed to generate mutual peer-to-peer mapping intersection for user IDs '%s' and '%s': %w", senderID, receiverID, err)
 	}
@@ -551,9 +551,9 @@ func (s *Store) DeclineFriendRequest(requestID string) error {
 func (s *Store) RemoveFriendMutual(userID, friendID string) error {
 	query := `
 	DELETE FROM friends
-	WHERE (user_id = ?1 AND friend_id = ?2) OR (user_id = ?2 AND friend_id = ?1);`
+	WHERE (user_id = ? AND friend_id = ?) OR (user_id = ? AND friend_id = ?);`
 
-	_, err := s.db.Exec(query, userID, friendID)
+	_, err := s.db.Exec(query, userID, friendID, friendID, userID)
 	if err != nil {
 		return fmt.Errorf("failed to sever mutual bidirectional connection map matching user IDs '%s' and '%s': %w", userID, friendID, err)
 	}
@@ -639,7 +639,7 @@ func (s *Store) ListIncomingPaymentRequests(userID string) ([]*models.PaymentReq
 
 func (s *Store) ListOutgoingPaymentRequests(userID string) ([]*models.PaymentRequest, error) {
 	query := `
-	SELECT id, requester_id, payer_id, amount, note, status, created_at, payer_id
+	SELECT id, requester_id, payer_id, amount, note, status, created_at
 	FROM payment_requests
 	WHERE requester_id = ? AND STATUS = 'pending';`
 
