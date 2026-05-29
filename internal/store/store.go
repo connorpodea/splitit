@@ -15,22 +15,27 @@ type Store struct {
 	db *sql.DB
 }
 
-// New initializes our database file
+// New initializes our database file using the standard default local file.
 func New() (*Store, error) {
+	return NewFromPath("app.db")
+}
 
-	// This creates a file called "app.db" if it doesn't exist
-	// Adding _pragma=foreign_keys=1 forces SQLite to enforce foreign key rules
-	db, err := sql.Open("sqlite", "app.db?_pragma=foreign_keys=1")
+// NewFromPath initializes the database engine from a custom path string.
+// This allows testing suites to pass ":memory:" for isolated, in-memory testing.
+func NewFromPath(path string) (*Store, error) {
+	// Dynamically append the foreign key pragma check configuration onto the incoming path
+	db, err := sql.Open("sqlite", path+"?_pragma=foreign_keys=1")
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to open database path '%s': %w", path, err)
 	}
 
 	s := &Store{db: db}
 
-	// Create our tables (if not yet created)
+	// Automate table generation schema rules execution
 	err = s.createTables()
 	if err != nil {
-		return nil, err
+		db.Close() // Clean up the connection if table creation fails
+		return nil, fmt.Errorf("database initialization failed during custom path schema setup: %w", err)
 	}
 
 	return s, nil
