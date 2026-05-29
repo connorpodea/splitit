@@ -37,7 +37,7 @@ func WriteJSON(w http.ResponseWriter, status int, data any) {
 func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	// Enforce that this endpoint only accepts POST requests (writing data)
 	if r.Method != http.MethodPost {
-		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only POST requestsare permitted on this route"})
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only POST requests are permitted on this route"})
 		return
 	}
 
@@ -62,3 +62,29 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusCreated, input)
 }
 
+func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
+	// Enforce that this endpoint only accepts GET requests (reading data)
+	if r.Method != http.MethodGet {
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only GET requests are permitted on this route"})
+		return
+	}
+
+	// Extract the user ID from the URL query parameters
+	userID := r.URL.Query().Get("id")
+
+	// Validate that the client actually provided an ID parameter
+	if userID == "" {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error" : "Missing required URL query parameter: 'id'"})
+		return
+	}
+
+	// Query the database engine using the extracted user ID string
+	user, err := h.store.GetUser(userID)
+	if err != nil {
+		WriteJSON(w, http.StatusNotFound, map[string]string{"error" : "No user profile found matching the provided ID"})
+		return
+	}
+
+	// Package the returned data struct into JSON and ship it over the wire
+	WriteJSON(w, http.StatusOK, user)
+}
