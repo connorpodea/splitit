@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/connorpodea/splitit/internal/models"
 	"github.com/connorpodea/splitit/internal/store"
 )
 
@@ -31,3 +32,33 @@ func WriteJSON(w http.ResponseWriter, status int, data any) {
 	// Stream and encode the Go data structure directly into the HTTP response body pipeline
 	json.NewEncoder(w).Encode(data)
 }
+
+// CreateUser handles the HTTP POST request to register a new user profile
+func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
+	// Enforce that this endpoint only accepts POST requests (writing data)
+	if r.Method != http.MethodPost {
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only POST requestsare permitted on this route"})
+		return
+	}
+
+	// Initialize an empty User model struct to hold the incoming data
+	var input models.User
+
+	// Read the JSON text out of the web request body and decode it into the Go struct
+	err := json.NewDecoder(r.Body).Decode(&input)
+	if err != nil {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON request payload formatting"})
+		return
+	}
+
+	// Pass the populated struct down to the database engine
+	err = h.store.CreateUser(&input)
+	if err != nil {
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to write the user record to database"})
+		return
+	}
+
+	// Send a successful response back out the window along with the created data
+	WriteJSON(w, http.StatusCreated, input)
+}
+

@@ -333,16 +333,21 @@ func (s *Store) CreateBNPLLoan(payment *models.Payment) error {
 		return fmt.Errorf("credit engine processing aborted: total plan financing installments cannot be evaluated at zero")
 	}
 
+	// Reject the loan if the requested amount exceeds the buyer's available credit limit
+	sender, err := s.GetUser(payment.SenderID)
+	if err != nil {
+		return fmt.Errorf("credit engine evaluation rejected: failed to query credit profile for buyer ID '%s': %w", payment.SenderID, err)
+	}
+	if payment.TotalAmount > sender.CreditLimit {
+		return fmt.Errorf("credit engine rejected: requested loan amount of $%.2f exceeds available credit limit of $%.2f for buyer ID '%s'", payment.TotalAmount, sender.CreditLimit, payment.SenderID)
+	}
+
 	// Variable for the raw price before fees
 	itemPrice := payment.TotalAmount
 
 	var feeRate float64 = 0.00
 	// Calculate the risk fee based on their credit health score iff they are paying over time
 	if payment.TotalInstallments > 1 {
-		sender, err := s.GetUser(payment.SenderID)
-		if err != nil {
-			return fmt.Errorf("credit engine evaluation rejected: failed to query credit profile for buyer ID '%s': %w", payment.SenderID, err)
-		}
 		feeRate = s.CalculateFeeRate(sender.CreditScore)
 	}
 
@@ -365,7 +370,7 @@ func (s *Store) CreateBNPLLoan(payment *models.Payment) error {
 	(id, sender_id, receiver_id, amount, total_amount, note, payment_type, total_installments, status)
 	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`
 
-	_, err := s.db.Exec(query, payment.ID, payment.SenderID, payment.ReceiverID, payment.Amount, payment.TotalAmount, payment.Note, payment.PaymentType, payment.TotalInstallments, payment.Status)
+	_, err = s.db.Exec(query, payment.ID, payment.SenderID, payment.ReceiverID, payment.Amount, payment.TotalAmount, payment.Note, payment.PaymentType, payment.TotalInstallments, payment.Status)
 	if err != nil {
 		return fmt.Errorf("loan processing aborted: failed to anchor master loan record ID '%s' into payments ledger: %w", payment.ID, err)
 	}
