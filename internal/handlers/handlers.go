@@ -90,7 +90,21 @@ func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
+	// Enforce that this endpoint only accepts GET requests
+	if r.Method != http.MethodGet {
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only GET requests are permitted to this route"})
+		return
+	}
 
+	// Query the database engine to retreive a slice of all users
+	users, err := h.store.ListUsers()
+	if err != nil {
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "There was an error in retrieving users"})
+		return
+	}
+
+	// Package the returned data struct into JSON and ship it over the wire
+	WriteJSON(w, http.StatusOK, users)
 }
 
 func (h *Handler) ListProfiles(w http.ResponseWriter, r *http.Request) {
