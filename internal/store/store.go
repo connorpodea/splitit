@@ -490,7 +490,7 @@ func (s *Store) CalculateFeeRate(creditScore uint8) float64 {
 }
 
 // ***** FINISH THIS LATER *****
-func (s *Store) UpdateCreditScore(userID string, delta uint8) error {
+func (s *Store) UpdateCreditScore(userID string, delta int) error {
 	// Clamp the resulting score between 0 and 100 to prevent overflow or underflow
 	query := `
 	UPDATE users
@@ -504,7 +504,6 @@ func (s *Store) UpdateCreditScore(userID string, delta uint8) error {
 	return nil
 }
 
-// ***** ADD A LATE PAYMENT DETECTION *****
 func (s *Store) PayInstallment(installmentID, paymentID, userID string, amount float64) error {
 	transaction, err := s.db.Begin()
 	if err != nil {
@@ -558,6 +557,41 @@ func (s *Store) PayInstallment(installmentID, paymentID, userID string, amount f
 	_, err = transaction.Exec(markPaidQuery, installmentID)
 	if err != nil {
 		return fmt.Errorf("installment settlement failed: unable to mark installment ID '%s' as paid: %w", installmentID, err)
+	}
+
+	// Check if this installment was paid late and penalize the credit score accordingly
+	var dueDate string
+	dueDateQuery := `
+	SELECT due_date
+	FROM installments
+	WHERE id = ?;`
+
+	err = transaction.QueryRow(dueDateQuery, installmentID).Scan(&dueDate)
+	if err != nil {
+		return fmt.Errorf("installment settlement failed: unable to retrieve due date for late payment evaluation on installment ID '%s': %w", installmentID, err)
+	}
+
+	parsedDueDate, err := time.Parse("2006-01-02", dueDate)
+	if err != nil {
+		return fmt.Errorf("installment settlement failed: unable to parse due date format for installment ID '%s': %w", installmentID, err)
+	}
+
+	// Deduct 5 credit score points for a late payment, reward 1 point for an on-time payment
+	var scoreDelta int
+	if time.Now().After(parsedDueDate) {
+		scoreDelta = -5
+	} else {
+		scoreDelta = 1
+	}
+
+	scoreQuery := `
+	UPDATE users
+	SET credit_score = MIN(100, MAX(0, credit_score + ?))
+	WHERE id = ?;`
+
+	_, err = transaction.Exec(scoreQuery, scoreDelta, userID)
+	if err != nil {
+		return fmt.Errorf("installment settlement failed: unable to apply credit score adjustment for user ID '%s': %w", userID, err)
 	}
 
 	// Check if all installments for this loan are now paid
@@ -652,7 +686,7 @@ func (s *Store) ListOverdueInstallments(userID string) ([]*models.Installment, e
 	query := `
 	SELECT id, payment_id, user_id, amount, due_date, is_paid, created_at
 	FROM installments
-	WHERE id = ? AND is_paid = 0 and due_date < ?;`
+	WHERE user_id = ? AND is_paid = 0 and due_date < ?;`
 
 	today := time.Now().Format("2006-01-02")
 
