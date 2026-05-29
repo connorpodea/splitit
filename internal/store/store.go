@@ -490,8 +490,18 @@ func (s *Store) CalculateFeeRate(creditScore uint8) float64 {
 }
 
 // ***** FINISH THIS LATER *****
-func (s *Store) UpdateCreditScore(userID string, delta uint8) uint8 {
-	return 0
+func (s *Store) UpdateCreditScore(userID string, delta uint8) error {
+	// Clamp the resulting score between 0 and 100 to prevent overflow or underflow
+	query := `
+	UPDATE users
+	SET credit_score = MIN(100, MAX(0, credit_score + ?))
+	WHERE id = ?`
+
+	_, err := s.db.Exec(query, delta, userID)
+	if err != nil {
+		return fmt.Errorf("failed to apply credit score adjustment of %+d points to user ID '%s': %w", delta, userID, err)
+	}
+	return nil
 }
 
 // ***** ADD A LATE PAYMENT DETECTION *****
@@ -602,7 +612,6 @@ func (s *Store) PayInstallment(installmentID, paymentID, userID string, amount f
 	return nil
 }
 
-// ***** FINISH THIS LATER *****
 func (s *Store) ListInstallments(userID string) ([]*models.Installment, error) {
 	query := `
 	SELECT id, payment_id, user_id, amount, due_date, is_paid, created_at
@@ -639,7 +648,6 @@ func (s *Store) ListInstallments(userID string) ([]*models.Installment, error) {
 	return installments, nil
 }
 
-// ***** FINISH THIS LATER *****
 func (s *Store) ListOverdueInstallments(userID string) ([]*models.Installment, error) {
 	query := `
 	SELECT id, payment_id, user_id, amount, due_date, is_paid, created_at
