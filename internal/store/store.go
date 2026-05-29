@@ -328,9 +328,20 @@ func (s *Store) Pay(payment *models.Payment) error {
 	return nil
 }
 
-// ***** FINISH THIS LATER *****
 func (s *Store) GetPayment(paymentID string) (*models.Payment, error) {
-	return nil, nil
+	query := `
+	SELECT id, sender_id, receiver_id, amount, total_amount, note, payment_type, total_installments, status, created_at
+	FROM payments
+	WHERE id = ?
+	`
+
+	var payment models.Payment
+
+	err := s.db.QueryRow(query, paymentID).Scan(&payment.ID, &payment.SenderID, &payment.ReceiverID, &payment.Amount, &payment.TotalAmount, &payment.Note, &payment.PaymentType, &payment.TotalInstallments, &payment.Status, &payment.CreatedAt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve payment record for transaction ID '%s' : %w", paymentID, err)
+	}
+	return &payment, nil
 }
 
 func (s *Store) CreateBNPLLoan(payment *models.Payment) error {
