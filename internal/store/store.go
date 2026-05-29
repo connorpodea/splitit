@@ -332,8 +332,7 @@ func (s *Store) GetPayment(paymentID string) (*models.Payment, error) {
 	query := `
 	SELECT id, sender_id, receiver_id, amount, total_amount, note, payment_type, total_installments, status, created_at
 	FROM payments
-	WHERE id = ?
-	`
+	WHERE id = ?;`
 
 	var payment models.Payment
 
@@ -605,7 +604,39 @@ func (s *Store) PayInstallment(installmentID, paymentID, userID string, amount f
 
 // ***** FINISH THIS LATER *****
 func (s *Store) ListInstallments(userID string) ([]*models.Installment, error) {
-	return nil, nil
+	query := `
+	SELECT id, payment_id, user_id, amount, due_date, is_paid, created_at
+	FROM installments
+	WHERE user_id = ?;`
+
+	rows, err := s.db.Query(query, userID)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve active debt obligation schedule for user ID '%s': %w", userID, err)
+	}
+	defer rows.Close()
+
+	var installments []*models.Installment
+
+	for rows.Next() {
+		var installment models.Installment
+		var isPaidInt int
+
+		err = rows.Scan(&installment.ID, &installment.PaymentID, &installment.UserWithDebt, &installment.Amount, &installment.DueDate, &isPaidInt, &installment.CreatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to deserialize installment row into debt schedule model structure: %w", err)
+		}
+
+		// Convert the SELite integer flag back to a Go boolean
+		installment.IsPaid = isPaidInt == 1
+		installments = append(installments, &installment)
+	}
+
+	// Check for errors encountered during iteration
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("detected a mid-stream cursor failure during installments iteration loop for user ID '%s': %w", userID, err)
+	}
+	return installments, nil
 }
 
 // ***** FINISH THIS LATER *****
