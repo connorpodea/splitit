@@ -126,7 +126,27 @@ func (h *Handler) ListProfiles(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) GetProfile(w http.ResponseWriter, r *http.Request) {
+	// Ensure that this endpoint only accepts GET requests
+	if r.Method != http.MethodGet {
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only GET requests are permitted to this route"})
+		return
+	}
 
+	// Extract the user ID from the URL query parameters
+	userID := r.URL.Query().Get("id")
+	if userID == "" {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Missing required URL query parameter: 'id'"})
+		return
+	}
+
+	// Query the database engine using the extracted user ID string
+	profile, err := h.store.GetProfile(userID)
+	if err != nil {
+		WriteJSON(w, http.StatusNotFound, map[string]string{"error": "No user profile found matching the provided ID"})
+	}
+
+	// Package the returned data struct into JSON and ship it over the wire
+	WriteJSON(w, http.StatusOK, profile)
 }
 
 func (h *Handler) PostPay(w http.ResponseWriter, r *http.Request) {
