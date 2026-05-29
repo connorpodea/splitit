@@ -348,6 +348,95 @@ func (s *Store) GetPayment(paymentID string) (*models.Payment, error) {
 	return &payment, nil
 }
 
+func (s *Store) CreatePaymentRequest(request *models.PaymentRequest) error {
+	query := `
+	INSERT INTO payment_requests
+	(id, requester_id, payer_id, amount, note, status)
+	VALUES (?,?,?,?,?,?);`
+
+	_, err := s.db.Exec(query, request.ID, request.RequesterID, request.PayerID, request.Amount, request.Note, request.Status)
+	if err != nil {
+		return fmt.Errorf("failed to push open payment demand requisition with invoice ID '%s' into table ledgers: %w", request.ID, err)
+	}
+	return nil
+}
+
+func (s *Store) ListIncomingPaymentRequests(userID string) ([]*models.PaymentRequest, error) {
+	query := `
+	SELECT id, requester_id, payer_id, amount, note, status, created_at
+	FROM payment_requests
+	WHERE payer_id = ? AND status = 'pending';`
+
+	rows, err := s.db.Query(query, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to look up outstanding pending payables collection dashboard records for user ID '%s': %w", userID, err)
+	}
+	defer rows.Close()
+
+	var requests []*models.PaymentRequest
+
+	for rows.Next() {
+		var r models.PaymentRequest
+
+		err = rows.Scan(&r.ID, &r.RequesterID, &r.PayerID, &r.Amount, &r.Note, &r.Status, &r.CreatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to unpack invoice variables into internal payment request structure array: %w", err)
+		}
+		requests = append(requests, &r)
+	}
+
+	// Check for errors encountered during iteration
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("detected an unexpected structural read failure inside payables pipeline engine iteration for user ID '%s': %w", userID, err)
+	}
+	return requests, nil
+}
+
+func (s *Store) ListOutgoingPaymentRequests(userID string) ([]*models.PaymentRequest, error) {
+	query := `
+	SELECT id, requester_id, payer_id, amount, note, status, created_at
+	FROM payment_requests
+	WHERE requester_id = ? AND status = 'pending';`
+
+	rows, err := s.db.Query(query, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to look up outbound collectibles receivables list directory for user ID '%s': %w", userID, err)
+	}
+	defer rows.Close()
+
+	var requests []*models.PaymentRequest
+
+	for rows.Next() {
+		var r models.PaymentRequest
+
+		err = rows.Scan(&r.ID, &r.RequesterID, &r.PayerID, &r.Amount, &r.Note, &r.Status, &r.CreatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to map outbound record fields safely to target collection model fields: %w", err)
+		}
+
+		requests = append(requests, &r)
+	}
+
+	// Check for errors encountered during iteration
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("detected an unexpected structural read failure inside collectibles receivables pipeline iteration for user ID '%s': %w", userID, err)
+	}
+	return requests, nil
+}
+
+func (s *Store) UpdatePaymentRequestStatus(paymentID, new_status string) error {
+	query := `
+	UPDATE payment_requests
+	SET status = ?
+	WHERE id = ?;`
+
+	_, err := s.db.Exec(query, new_status, paymentID)
+	if err != nil {
+		return fmt.Errorf("state machine error: failed to transition payment invoice request ID '%s' to state token '%s': %w", paymentID, new_status, err)
+	}
+	return nil
+}
+
 func (s *Store) CreateBNPLLoan(payment *models.Payment) error {
 	if payment.TotalInstallments == 0 {
 		return fmt.Errorf("credit engine processing aborted: total plan financing installments cannot be evaluated at zero")
@@ -888,93 +977,4 @@ func (s *Store) ListFriends(userID string) ([]*models.Profile, error) {
 		return nil, fmt.Errorf("detected structural cursor disruption within active user friends list scanner loop for ID '%s': %w", userID, err)
 	}
 	return friends, nil
-}
-
-func (s *Store) CreatePaymentRequest(request *models.PaymentRequest) error {
-	query := `
-	INSERT INTO payment_requests
-	(id, requester_id, payer_id, amount, note, status)
-	VALUES (?,?,?,?,?,?);`
-
-	_, err := s.db.Exec(query, request.ID, request.RequesterID, request.PayerID, request.Amount, request.Note, request.Status)
-	if err != nil {
-		return fmt.Errorf("failed to push open payment demand requisition with invoice ID '%s' into table ledgers: %w", request.ID, err)
-	}
-	return nil
-}
-
-func (s *Store) ListIncomingPaymentRequests(userID string) ([]*models.PaymentRequest, error) {
-	query := `
-	SELECT id, requester_id, payer_id, amount, note, status, created_at
-	FROM payment_requests
-	WHERE payer_id = ? AND status = 'pending';`
-
-	rows, err := s.db.Query(query, userID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to look up outstanding pending payables collection dashboard records for user ID '%s': %w", userID, err)
-	}
-	defer rows.Close()
-
-	var requests []*models.PaymentRequest
-
-	for rows.Next() {
-		var r models.PaymentRequest
-
-		err = rows.Scan(&r.ID, &r.RequesterID, &r.PayerID, &r.Amount, &r.Note, &r.Status, &r.CreatedAt)
-		if err != nil {
-			return nil, fmt.Errorf("failed to unpack invoice variables into internal payment request structure array: %w", err)
-		}
-		requests = append(requests, &r)
-	}
-
-	// Check for errors encountered during iteration
-	if err = rows.Err(); err != nil {
-		return nil, fmt.Errorf("detected an unexpected structural read failure inside payables pipeline engine iteration for user ID '%s': %w", userID, err)
-	}
-	return requests, nil
-}
-
-func (s *Store) ListOutgoingPaymentRequests(userID string) ([]*models.PaymentRequest, error) {
-	query := `
-	SELECT id, requester_id, payer_id, amount, note, status, created_at
-	FROM payment_requests
-	WHERE requester_id = ? AND status = 'pending';`
-
-	rows, err := s.db.Query(query, userID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to look up outbound collectibles receivables list directory for user ID '%s': %w", userID, err)
-	}
-	defer rows.Close()
-
-	var requests []*models.PaymentRequest
-
-	for rows.Next() {
-		var r models.PaymentRequest
-
-		err = rows.Scan(&r.ID, &r.RequesterID, &r.PayerID, &r.Amount, &r.Note, &r.Status, &r.CreatedAt)
-		if err != nil {
-			return nil, fmt.Errorf("failed to map outbound record fields safely to target collection model fields: %w", err)
-		}
-
-		requests = append(requests, &r)
-	}
-
-	// Check for errors encountered during iteration
-	if err = rows.Err(); err != nil {
-		return nil, fmt.Errorf("detected an unexpected structural read failure inside collectibles receivables pipeline iteration for user ID '%s': %w", userID, err)
-	}
-	return requests, nil
-}
-
-func (s *Store) UpdatePaymentRequestStatus(paymentID, new_status string) error {
-	query := `
-	UPDATE payment_requests
-	SET status = ?
-	WHERE id = ?;`
-
-	_, err := s.db.Exec(query, new_status, paymentID)
-	if err != nil {
-		return fmt.Errorf("state machine error: failed to transition payment invoice request ID '%s' to state token '%s': %w", paymentID, new_status, err)
-	}
-	return nil
 }
