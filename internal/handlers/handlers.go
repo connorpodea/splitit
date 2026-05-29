@@ -96,7 +96,7 @@ func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Query the database engine to retreive a slice of all users
+	// Query the database engine to retrieve a slice of all users
 	users, err := h.store.ListUsers()
 	if err != nil {
 		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "There was an error in retrieving users"})
@@ -108,7 +108,21 @@ func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) ListProfiles(w http.ResponseWriter, r *http.Request) {
+	// Enforce that this endpoint only accepts GET requests
+	if r.Method != http.MethodGet {
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only GET requests are permitted to this route"})
+		return
+	}
 
+	// Query the database engine to retrieve a slice of all profiles
+	profiles, err := h.store.ListProfiles()
+	if err != nil {
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "There was an error in retrieving profiles"})
+		return
+	}
+
+	// Package the returned data struct into JSON and ship it over the wire
+	WriteJSON(w, http.StatusOK, profiles)
 }
 
 func (h *Handler) GetProfile(w http.ResponseWriter, r *http.Request) {
