@@ -328,6 +328,11 @@ func (s *Store) Pay(payment *models.Payment) error {
 	return nil
 }
 
+// ***** FINISH THIS LATER *****
+func (s *Store) GetPayment(paymentID string) (*models.Payment, error) {
+	return nil, nil
+}
+
 func (s *Store) CreateBNPLLoan(payment *models.Payment) error {
 	if payment.TotalInstallments == 0 {
 		return fmt.Errorf("credit engine processing aborted: total plan financing installments cannot be evaluated at zero")
@@ -474,6 +479,12 @@ func (s *Store) CalculateFeeRate(creditScore uint8) float64 {
 	}
 }
 
+// ***** FINISH THIS LATER *****
+func (s *Store) UpdateCreditScore(userID string, delta uint8) uint8 {
+	return 0
+}
+
+// ***** ADD A LATE PAYMENT DETECTION *****
 func (s *Store) PayInstallment(installmentID, paymentID, userID string, amount float64) error {
 	transaction, err := s.db.Begin()
 	if err != nil {
@@ -579,6 +590,16 @@ func (s *Store) PayInstallment(installmentID, paymentID, userID string, amount f
 		return fmt.Errorf("critical engine tracking mismatch: failed to write installment block modifications to disk on final commit sequence: %w", err)
 	}
 	return nil
+}
+
+// ***** FINISH THIS LATER *****
+func (s *Store) ListInstallments(userID string) ([]*models.Installment, error) {
+	return nil, nil
+}
+
+// ***** FINISH THIS LATER *****
+func (s *Store) ListOverdueInstallments(userID string) ([]*models.Installment, error) {
+	return nil, nil
 }
 
 func (s *Store) SendFriendRequest(request *models.FriendRequest) error {
