@@ -541,7 +541,7 @@ func (s *Store) PayInstallment(installmentID, paymentID, userID string, amount f
 		return fmt.Errorf("installment settlement failed: unable to evaluate remaining debt obligations for loan ID '%s': %w", paymentID, err)
 	}
 
-	// If all installments are cleared, restore the full loan amount back to the buyer's credit limit
+	// If all installments are cleared, restore the full loan amount back to the buyer's credit limit and mark the master loan record as completed
 	if unpaidCount == 0 {
 		var loanAmount float64
 		loanAmountQuery := `
@@ -562,6 +562,16 @@ func (s *Store) PayInstallment(installmentID, paymentID, userID string, amount f
 		_, err = transaction.Exec(restoreQuery, loanAmount, userID)
 		if err != nil {
 			return fmt.Errorf("installment settlement failed: unable to restore $%.2f to credit limit for user ID '%s': %w", loanAmount, userID, err)
+		}
+
+		loanStatusQuery := `
+		UPDATE payments
+		SET status = 'completed'
+		WHERE id = ?;`
+
+		_, err = transaction.Exec(loanStatusQuery, paymentID)
+		if err != nil {
+			return fmt.Errorf("installment settlement failed: unable to mark loan ID '%s' as completed: %w", paymentID, err)
 		}
 	}
 
