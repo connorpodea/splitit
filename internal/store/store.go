@@ -375,6 +375,16 @@ func (s *Store) CreateBNPLLoan(payment *models.Payment) error {
 		return fmt.Errorf("loan processing aborted: failed to anchor master loan record ID '%s' into payments ledger: %w", payment.ID, err)
 	}
 
+	creditQuery := `
+	UPDATE users
+	SET credit_limit = credit_limit - ?
+	WHERE id = ?;`
+
+	_, err = s.db.Exec(creditQuery, itemPrice, payment.SenderID)
+	if err != nil {
+		return fmt.Errorf("loan processing aborted: failed to deduct $%.2f from credit limit for buyer ID '%s': %w", itemPrice, payment.SenderID, err)
+	}
+
 	// Step 2: Pay the Merchant — the app treasury injects the full item price to the seller immediately
 	fundingPayment := &models.Payment{
 		ID:                fmt.Sprintf("fund_%s", payment.ID),
@@ -462,6 +472,103 @@ func (s *Store) CalculateFeeRate(creditScore uint8) float64 {
 	default:
 		return 0.07
 	}
+}
+
+func (s *Store) PayInstallment(installmentID, paymentID, userID string, amount float64) error {
+	transaction, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("installment settlement aborted: failed to open transaction session context: %w", err)
+	}
+	// If the function exits early due to an error, discard all changes
+	defer transaction.Rollback()
+
+	// Block the buyer from going into negative balance
+	var currentBalance float64
+	balanceQuery := `
+	SELECT balance
+	FROM users
+	WHERE id = ?;`
+
+	err = transaction.QueryRow(balanceQuery, userID).Scan(&currentBalance)
+	if err != nil {
+		return fmt.Errorf("installment settlement failed: unable to verify buyer funds for user ID '%s': %w", userID, err)
+	}
+	if currentBalance < amount {
+		return fmt.Errorf("installment settlement rejected: insufficient liquid funds (ID: '%s' attempted to pay $%.2f but only has $%.2f)", userID, amount, currentBalance)
+	}
+
+	// Deduct the installment amount from the buyer and credit the treasury
+	deductQuery := `
+	UPDATE users
+	SET balance = balance - ?
+	WHERE id = ?;`
+
+	_, err = transaction.Exec(deductQuery, amount, userID)
+	if err != nil {
+		return fmt.Errorf("installment settlement failed: unable to deduct $%.2f from buyer ID '%s': %w", amount, userID, err)
+	}
+
+	creditQuery := `
+	UPDATE users
+	SET balance = balance + ?
+	WHERE id = ?;`
+
+	_, err = transaction.Exec(creditQuery, amount, "app_treasury")
+	if err != nil {
+		return fmt.Errorf("installment settlement failed: unable to credit $%.2f to treasury: %w", amount, err)
+	}
+
+	// Mark the installment row as paid
+	markPaidQuery := `
+	UPDATE installments
+	SET is_paid = 1
+	WHERE id = ?;`
+
+	_, err = transaction.Exec(markPaidQuery, installmentID)
+	if err != nil {
+		return fmt.Errorf("installment settlement failed: unable to mark installment ID '%s' as paid: %w", installmentID, err)
+	}
+
+	// Check if all installments for this loan are now paid
+	var unpaidCount int
+	unpaidQuery := `
+	SELECT COUNT(*)
+	FROM installments
+	WHERE payment_id = ? AND is_paid = 0;`
+
+	err = transaction.QueryRow(unpaidQuery, paymentID).Scan(&unpaidCount)
+	if err != nil {
+		return fmt.Errorf("installment settlement failed: unable to evaluate remaining debt obligations for loan ID '%s': %w", paymentID, err)
+	}
+
+	// If all installments are cleared, restore the full loan amount back to the buyer's credit limit
+	if unpaidCount == 0 {
+		var loanAmount float64
+		loanAmountQuery := `
+		SELECT amount
+		FROM payments
+		WHERE id = ?;`
+
+		err = transaction.QueryRow(loanAmountQuery, paymentID).Scan(&loanAmount)
+		if err != nil {
+			return fmt.Errorf("installment settlement failed: unable to retrieve original loan amount for credit limit restoration on loan ID '%s': %w", paymentID, err)
+		}
+
+		restoreQuery := `
+		UPDATE users
+		SET credit_limit = credit_limit + ?
+		WHERE id = ?;`
+
+		_, err = transaction.Exec(restoreQuery, loanAmount, userID)
+		if err != nil {
+			return fmt.Errorf("installment settlement failed: unable to restore $%.2f to credit limit for user ID '%s': %w", loanAmount, userID, err)
+		}
+	}
+
+	if err = transaction.Commit(); err != nil {
+		return fmt.Errorf("critical engine tracking mismatch: failed to write installment block modifications to disk on final commit sequence: %w", err)
+	}
+	return nil
 }
 
 func (s *Store) SendFriendRequest(request *models.FriendRequest) error {
