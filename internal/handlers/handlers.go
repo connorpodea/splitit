@@ -74,17 +74,97 @@ func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
 
 	// Validate that the client actually provided an ID parameter
 	if userID == "" {
-		WriteJSON(w, http.StatusBadRequest, map[string]string{"error" : "Missing required URL query parameter: 'id'"})
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Missing required URL query parameter: 'id'"})
 		return
 	}
 
 	// Query the database engine using the extracted user ID string
 	user, err := h.store.GetUser(userID)
 	if err != nil {
-		WriteJSON(w, http.StatusNotFound, map[string]string{"error" : "No user profile found matching the provided ID"})
+		WriteJSON(w, http.StatusNotFound, map[string]string{"error": "No user profile found matching the provided ID"})
 		return
 	}
 
 	// Package the returned data struct into JSON and ship it over the wire
 	WriteJSON(w, http.StatusOK, user)
+}
+
+func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
+
+}
+
+func (h *Handler) ListProfiles(w http.ResponseWriter, r *http.Request) {
+
+}
+
+func (h *Handler) GetProfile(w http.ResponseWriter, r *http.Request) {
+
+}
+
+func (h *Handler) PostPay(w http.ResponseWriter, r *http.Request) {
+
+}
+
+func (h *Handler) GetPayment(w http.ResponseWriter, r *http.Request) {
+
+}
+
+func (h *Handler) CreateBNPLLoan(w http.ResponseWriter, r *http.Request) {
+
+}
+
+func (h *Handler) PayInstallment(w http.ResponseWriter, r *http.Request) {
+
+}
+
+func (h *Handler) ListInstallments(w http.ResponseWriter, r *http.Request) {
+
+}
+
+func (h *Handler) ListOverdueInstallments(w http.ResponseWriter, r *http.Request) {
+
+}
+
+func (h *Handler) SendFriendRequest(w http.ResponseWriter, r *http.Request) {
+
+}
+
+func (h *Handler) ListIncomingFriendRequests(w http.ResponseWriter, r *http.Request) {
+
+}
+
+func (h *Handler) ListOutgoingFriendRequests(w http.ResponseWriter, r *http.Request) {
+
+}
+
+func (h *Handler) AcceptFriendRequest(w http.ResponseWriter, r *http.Request) {
+
+}
+
+func (h *Handler) DeclineFriendRequest(w http.ResponseWriter, r *http.Request) {
+
+}
+
+func (h *Handler) RemoveFriendMutual(w http.ResponseWriter, r *http.Request) {
+
+}
+
+func (h *Handler) ListFriends(w http.ResponseWriter, r *http.Request) {
+
+}
+
+func (h *Handler) CreatePaymentRequst(w http.ResponseWriter, r *http.Request) {
+
+}
+
+func (h *Handler) ListIncomingPaymentRequests(w http.ResponseWriter, r *http.Request) {
+
+}
+
+func (h *Handler) ListOutgoingPaymentRequests(w http.ResponseWriter, r *http.Request) {
+
+}
+
+func (h *Handler) UpdatePaymentRequestStatus(w http.ResponseWriter, r *http.Request) {
+
 }

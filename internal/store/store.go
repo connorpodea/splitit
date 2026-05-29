@@ -494,7 +494,6 @@ func (s *Store) CalculateFeeRate(creditScore uint8) float64 {
 	}
 }
 
-// ***** FINISH THIS LATER *****
 func (s *Store) UpdateCreditScore(userID string, delta int) error {
 	// Clamp the resulting score between 0 and 100 to prevent overflow or underflow
 	query := `
