@@ -620,15 +620,15 @@ func (s *Store) ListInstallments(userID string) ([]*models.Installment, error) {
 
 	for rows.Next() {
 		var installment models.Installment
-		var isPaidInt int
+		var is_paid_int int
 
-		err = rows.Scan(&installment.ID, &installment.PaymentID, &installment.UserWithDebt, &installment.Amount, &installment.DueDate, &isPaidInt, &installment.CreatedAt)
+		err = rows.Scan(&installment.ID, &installment.PaymentID, &installment.UserWithDebt, &installment.Amount, &installment.DueDate, &is_paid_int, &installment.CreatedAt)
 		if err != nil {
 			return nil, fmt.Errorf("failed to deserialize installment row into debt schedule model structure: %w", err)
 		}
 
 		// Convert the SELite integer flag back to a Go boolean
-		installment.IsPaid = isPaidInt == 1
+		installment.IsPaid = is_paid_int == 1
 		installments = append(installments, &installment)
 	}
 
@@ -641,7 +641,40 @@ func (s *Store) ListInstallments(userID string) ([]*models.Installment, error) {
 
 // ***** FINISH THIS LATER *****
 func (s *Store) ListOverdueInstallments(userID string) ([]*models.Installment, error) {
-	return nil, nil
+	query := `
+	SELECT id, payment_id, user_id, amount, due_date, is_paid, created_at
+	FROM installments
+	WHERE id = ? AND is_paid = 0 and due_date < ?;`
+
+	today := time.Now().Format("2006-01-02")
+
+	rows, err := s.db.Query(query, userID, today)
+	if err != nil {
+		return nil, fmt.Errorf("failed to scan overdue delinquency obligation records for user ID '%s': %w", userID, err)
+	}
+	defer rows.Close()
+
+	var installments []*models.Installment
+
+	for rows.Next() {
+		var installment models.Installment
+		var is_paid_int int
+
+		err = rows.Scan(&installment.ID, &installment.PaymentID, &installment.UserWithDebt, &installment.Amount, &installment.DueDate, &is_paid_int, &installment.CreatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to deserialize overdue installment row into debt schedule model structure: %w", err)
+		}
+
+		// Convert the SELite integer flag back to a Go boolean
+		installment.IsPaid = is_paid_int == 1
+		installments = append(installments, &installment)
+	}
+
+	// Check for errors encountered during iteration
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("detected a mid-stream cursor failure during overdue installments iteration loop for user ID '%s': %w", userID, err)
+	}
+	return installments, nil
 }
 
 func (s *Store) SendFriendRequest(request *models.FriendRequest) error {
