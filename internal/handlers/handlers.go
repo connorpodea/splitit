@@ -242,7 +242,28 @@ func (h *Handler) SendFriendRequest(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) ListIncomingFriendRequests(w http.ResponseWriter, r *http.Request) {
+	// Ensure that this endpoint only accepts GET requests
+	if r.Method != http.MethodGet {
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only GET requests are permitted to this route"})
+		return
+	}
 
+	// Extract the user ID from the URL query parameters
+	userID := r.URL.Query().Get("receiver_id")
+	if userID == "" {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Missing required URL parameter: 'receiver_id'"})
+		return
+	}
+
+	// Query the database engine to retrieve a slice of incoming friend requests
+	requests, err := h.store.ListIncomingFriendRequests(userID)
+	if err != nil {
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "There was an error in retrieving this users incomign friend requests"})
+		return
+	}
+
+	// Package the returned data into JSON and ship it over the wire
+	WriteJSON(w, http.StatusOK, requests)
 }
 
 func (h *Handler) ListOutgoingFriendRequests(w http.ResponseWriter, r *http.Request) {
