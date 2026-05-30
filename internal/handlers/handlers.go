@@ -143,6 +143,7 @@ func (h *Handler) GetProfile(w http.ResponseWriter, r *http.Request) {
 	profile, err := h.store.GetProfile(userID)
 	if err != nil {
 		WriteJSON(w, http.StatusNotFound, map[string]string{"error": "No user profile found matching the provided ID"})
+		return
 	}
 
 	// Package the returned data struct into JSON and ship it over the wire
@@ -154,7 +155,27 @@ func (h *Handler) PostPay(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) GetPayment(w http.ResponseWriter, r *http.Request) {
+	// Ensure that this endpoint only accepts GET requests
+	if r.Method != http.MethodGet {
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only GET requests are permitted to this route"})
+		return
+	}
 
+	// Extract the payment ID from the URL query parameters
+	paymentID := r.URL.Query().Get("id")
+	if paymentID == "" {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Missing required URL query parameter: 'id'"})
+		return
+	}
+
+	// Query the database engine using the extracted payment ID string
+	payment, err := h.store.GetPayment(paymentID)
+	if err != nil {
+		WriteJSON(w, http.StatusNotFound, map[string]string{"error": "No payment found matching the provided ID"})
+		return
+	}
+
+	WriteJSON(w, http.StatusOK, payment)
 }
 
 func (h *Handler) CreateBNPLLoan(w http.ResponseWriter, r *http.Request) {
