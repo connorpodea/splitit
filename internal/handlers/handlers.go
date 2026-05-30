@@ -424,7 +424,34 @@ func (h *Handler) AcceptFriendRequest(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) DeclineFriendRequest(w http.ResponseWriter, r *http.Request) {
+	// Ensure this endpoint on accepts POST requests
+	if r.Method != http.MethodPost {
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only POST methods are permitted to this route"})
+		return
+	}
 
+	// Initialize an custom, empty struct to hold the incoming data
+	type Input struct {
+		RequestID string `json:"request_id"`
+	}
+	var input Input
+
+	// Read the JSON text out of the web request body and decode it into the variable
+	err := json.NewDecoder(r.Body).Decode(&input)
+	if err != nil {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON request payload formatting"})
+		return
+	}
+
+	// Pass the variable down to the database engine
+	err = h.store.DeclineFriendRequest(input.RequestID)
+	if err != nil {
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	// Send a successful response back out the window along with the created data
+	WriteJSON(w, http.StatusOK, input)
 }
 
 func (h *Handler) RemoveFriendMutual(w http.ResponseWriter, r *http.Request) {
