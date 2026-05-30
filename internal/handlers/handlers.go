@@ -78,7 +78,7 @@ func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Query the database engine using the extracted user ID string
+	// Query the database engine for this user
 	user, err := h.store.GetUser(userID)
 	if err != nil {
 		WriteJSON(w, http.StatusNotFound, map[string]string{"error": "No user profile found matching the provided ID"})
@@ -96,7 +96,7 @@ func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Query the database engine to retrieve a slice of all users
+	// Query the database engine for all users
 	users, err := h.store.ListUsers()
 	if err != nil {
 		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "There was an error in retrieving users"})
@@ -114,7 +114,7 @@ func (h *Handler) ListProfiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Query the database engine to retrieve a slice of all profiles
+	// Query the database engine for all profiles
 	profiles, err := h.store.ListProfiles()
 	if err != nil {
 		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "There was an error in retrieving profiles"})
@@ -139,7 +139,7 @@ func (h *Handler) GetProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Query the database engine using the extracted user ID string
+	// Query the database engine for this profile
 	profile, err := h.store.GetProfile(userID)
 	if err != nil {
 		WriteJSON(w, http.StatusNotFound, map[string]string{"error": "No user profile found matching the provided ID"})
@@ -168,7 +168,7 @@ func (h *Handler) GetPayment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Query the database engine using the extracted payment ID string
+	// Query the database engine for this payment
 	payment, err := h.store.GetPayment(paymentID)
 	if err != nil {
 		WriteJSON(w, http.StatusNotFound, map[string]string{"error": "No payment found matching the provided ID"})
@@ -201,7 +201,7 @@ func (h *Handler) ListInstallments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Query the database engine to retrieve a slice of all installments
+	// Query the database engine for this users installments
 	installments, err := h.store.ListInstallments(userID)
 	if err != nil {
 		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "There was an error in retrieving this users installments"})
@@ -226,7 +226,7 @@ func (h *Handler) ListOverdueInstallments(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Query the database engine to retrieve a slice of all overdue installments
+	// Query the database engine for this users overdue installments
 	installments, err := h.store.ListOverdueInstallments(userID)
 	if err != nil {
 		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "There was an error in retrieving this users overdue installments"})
@@ -255,7 +255,7 @@ func (h *Handler) ListIncomingFriendRequests(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// Query the database engine to retrieve a slice of incoming friend requests
+	// Query the database engine for this users incoming friend requests
 	requests, err := h.store.ListIncomingFriendRequests(userID)
 	if err != nil {
 		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "There was an error in retrieving this users incoming friend requests"})
@@ -280,7 +280,7 @@ func (h *Handler) ListOutgoingFriendRequests(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// Query the database engine to retrieve a slice of incoming friend requests
+	// Query the database engine for this users outgoing friend requests
 	requests, err := h.store.ListIncomingFriendRequests(userID)
 	if err != nil {
 		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "There was an error in retrieving this users outgoing friend requests"})
@@ -317,7 +317,7 @@ func (h *Handler) ListFriends(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Query the databse engine to retrieve a slice of this users friends
+	// Query the database engine for this users friends
 	friends, err := h.store.ListFriends(userID)
 	if err != nil {
 		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "There was an error in retrieving this users friends"})
@@ -346,7 +346,7 @@ func (h *Handler) ListIncomingPaymentRequests(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// Query the database engine for a slice of all incoming payment requests associated with this userID
+	// Query the database engine for this users incoming payment requests
 	requests, err := h.store.ListIncomingPaymentRequests(userID)
 	if err != nil {
 		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "There was an error in retrieving this users incoming payment requests"})
@@ -358,7 +358,28 @@ func (h *Handler) ListIncomingPaymentRequests(w http.ResponseWriter, r *http.Req
 }
 
 func (h *Handler) ListOutgoingPaymentRequests(w http.ResponseWriter, r *http.Request) {
+	// Ensure this endpoint only accepts GET requests
+	if r.Method != http.MethodGet {
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only GET methods are permitted to this route"})
+		return
+	}
 
+	// Extract the userID from the URL query parameters
+	userID := r.URL.Query().Get("user_id")
+	if userID == "" {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Missing required URL parameter: 'user_id'"})
+		return
+	}
+
+	// Query the database engine for this users outgoing payment requests
+	requests, err := h.store.ListOutgoingPaymentRequests(userID)
+	if err != nil {
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "There was an error retrieving this users outgoing payment requests"})
+		return
+	}
+
+	// Package the returned data into JSON and ship it over the wire
+	WriteJSON(w, http.StatusOK, requests)
 }
 
 func (h *Handler) UpdatePaymentRequestStatus(w http.ResponseWriter, r *http.Request) {
