@@ -133,9 +133,9 @@ func (h *Handler) GetProfile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Extract the user ID from the URL query parameters
-	userID := r.URL.Query().Get("id")
+	userID := r.URL.Query().Get("user_id")
 	if userID == "" {
-		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Missing required URL query parameter: 'id'"})
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Missing required URL query parameter: 'user_id'"})
 		return
 	}
 
@@ -162,9 +162,9 @@ func (h *Handler) GetPayment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Extract the payment ID from the URL query parameters
-	paymentID := r.URL.Query().Get("id")
+	paymentID := r.URL.Query().Get("payment_id")
 	if paymentID == "" {
-		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Missing required URL query parameter: 'id'"})
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Missing required URL query parameter: 'payment_id'"})
 		return
 	}
 
@@ -304,7 +304,28 @@ func (h *Handler) RemoveFriendMutual(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) ListFriends(w http.ResponseWriter, r *http.Request) {
+	// Ensure this endpoint only accepts GET requests
+	if r.Method != http.MethodGet {
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only GET methods are permitted to this route"})
+		return
+	}
 
+	// Extract the user ID from the URL query parameters
+	userID := r.URL.Query().Get("user_id")
+	if userID == "" {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Missing required URL parameter : 'user_id'"})
+		return
+	}
+
+	// Query the databse engine to retrieve a slice of this users friends
+	friends, err := h.store.ListFriends(userID)
+	if err != nil {
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "There was an error in retrieving this users friends"})
+		return
+	}
+
+	// Package the returned data into JSON and ship it over the wire
+	WriteJSON(w, http.StatusOK, friends)
 }
 
 func (h *Handler) CreatePaymentRequst(w http.ResponseWriter, r *http.Request) {
