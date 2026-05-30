@@ -232,7 +232,38 @@ func (h *Handler) CreateBNPLLoan(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) PayInstallment(w http.ResponseWriter, r *http.Request) {
+	// Ensure that this enpoint only accepts POST requests
+	if r.Method != http.MethodPost {
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only POST requests are permitted to this route"})
+		return
+	}
 
+	// Initialize custom, empty struct to hold the incoming data
+	type Input struct {
+		InstallmentID string  `json:"installment_id"`
+		PaymentID     string  `json:"payment_id"`
+		UserID        string  `json:"user_id"`
+		Amount        float64 `json:"amount"`
+	}
+
+	var input Input
+
+	// Read the JSON text out of the web request body and decode it into the Go struct
+	err := json.NewDecoder(r.Body).Decode(&input)
+	if err != nil {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON request payload formatting"})
+		return
+	}
+
+	// Pass the populated struct down to the database engine
+	err = h.store.PayInstallment(input.InstallmentID, input.PaymentID, input.UserID, input.Amount)
+	if err != nil {
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	// Send a successful response back out the window along with the created data
+	WriteJSON(w, http.StatusOK, input)
 }
 
 func (h *Handler) ListInstallments(w http.ResponseWriter, r *http.Request) {
