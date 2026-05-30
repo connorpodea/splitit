@@ -249,9 +249,9 @@ func (h *Handler) ListIncomingFriendRequests(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Extract the user ID from the URL query parameters
-	userID := r.URL.Query().Get("receiver_id")
+	userID := r.URL.Query().Get("user_id")
 	if userID == "" {
-		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Missing required URL parameter: 'receiver_id'"})
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Missing required URL parameter: 'user_id'"})
 		return
 	}
 
@@ -274,9 +274,9 @@ func (h *Handler) ListOutgoingFriendRequests(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Extract the user ID from the URL query parameters
-	userID := r.URL.Query().Get("sender_id")
+	userID := r.URL.Query().Get("user_id")
 	if userID == "" {
-		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Missing required URL parameter: 'sender_id'"})
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Missing required URL parameter: 'user_id'"})
 		return
 	}
 
@@ -333,7 +333,28 @@ func (h *Handler) CreatePaymentRequst(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) ListIncomingPaymentRequests(w http.ResponseWriter, r *http.Request) {
+	// Ensure this endpoint only accepts GET requests
+	if r.Method != http.MethodGet {
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only GET methods are permitted to this route"})
+		return
+	}
 
+	// Extract the userID from the URL query parameters
+	userID := r.URL.Query().Get("user_id")
+	if userID == "" {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Missing required URL parameter: 'user_id'"})
+		return
+	}
+
+	// Query the database engine for a slice of all incoming payment requests associated with this userID
+	requests, err := h.store.ListIncomingPaymentRequests(userID)
+	if err != nil {
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "There was an error in retrieving this users incoming payment requests"})
+		return
+	}
+
+	// Package the returned data into JSON and ship it over the wire
+	WriteJSON(w, http.StatusOK, requests)
 }
 
 func (h *Handler) ListOutgoingPaymentRequests(w http.ResponseWriter, r *http.Request) {
