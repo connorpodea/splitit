@@ -511,7 +511,31 @@ func (h *Handler) ListFriends(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) CreatePaymentRequst(w http.ResponseWriter, r *http.Request) {
+	// Ensure this endpoint only accepts POST requests
+	if r.Method != http.MethodPost {
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only POST methods are permitted to this route"})
+		return
+	}
 
+	// Initialize an empty Payment model struct to hold the incoming data
+	var input models.PaymentRequest
+
+	// Read the JSON text out of the web request body and decode it into the variable
+	err := json.NewDecoder(r.Body).Decode(&input)
+	if err != nil {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON request payload formatting"})
+		return
+	}
+
+	// Pass the variable down to the database engine
+	err = h.store.CreatePaymentRequest(&input)
+	if err != nil {
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	// Send a successful response back out the window along with the created data
+	WriteJSON(w, http.StatusOK, input)
 }
 
 func (h *Handler) ListIncomingPaymentRequests(w http.ResponseWriter, r *http.Request) {
