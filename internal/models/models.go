@@ -1,14 +1,15 @@
 package models
 
 type User struct {
-	ID          string  `json:"id"`
-	Name        string  `json:"name"`
-	Email       string  `json:"email"`
-	PhoneNumber string  `json:"phone_number"`
-	Balance     float64 `json:"balance"`
-	CreditScore uint8   `json:"credit_score"`
-	CreditLimit float64 `json:"credit_limit"`
-	CreatedAt   string  `json:"created_at"`
+	ID           string  `json:"id"`
+	PasswordHash string  `json:"-"`
+	Name         string  `json:"name"`
+	Email        string  `json:"email"`
+	PhoneNumber  string  `json:"phone_number"`
+	Balance      float64 `json:"balance"`
+	CreditScore  uint8   `json:"credit_score"`
+	CreditLimit  float64 `json:"credit_limit"`
+	CreatedAt    string  `json:"created_at"`
 }
 
 type Profile struct {

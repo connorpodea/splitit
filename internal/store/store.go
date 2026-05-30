@@ -54,6 +54,7 @@ func (s *Store) createTables() error {
 	query := `
 	CREATE TABLE IF NOT EXISTS users (
 		id TEXT PRIMARY KEY,
+		password_hash TEXT,
 		name TEXT,
 		email TEXT,
 		phone_number TEXT,
@@ -170,10 +171,10 @@ func (s *Store) createTables() error {
 func (s *Store) CreateUser(user *models.User) error {
 	query := `
 	INSERT INTO users 
-	(id, name, email, phone_number, balance, credit_score, credit_limit) 
-	VALUES (?, ?, ?, ?, ?, ?, ?);`
+	(id, password_hash, name, email, phone_number, balance, credit_score, credit_limit) 
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?);`
 
-	_, err := s.db.Exec(query, user.ID, user.Name, user.Email, user.PhoneNumber, user.Balance, user.CreditScore, user.CreditLimit)
+	_, err := s.db.Exec(query, user.ID, user.PasswordHash, user.Name, user.Email, user.PhoneNumber, user.Balance, user.CreditScore, user.CreditLimit)
 	if err != nil {
 		return fmt.Errorf("failed to write profile for user ID '%s' to database: %w", user.ID, err)
 	}
@@ -182,12 +183,12 @@ func (s *Store) CreateUser(user *models.User) error {
 
 func (s *Store) GetUser(userID string) (*models.User, error) {
 	query := `
-	SELECT id, name, email, phone_number, balance, credit_score, credit_limit, created_at 
+	SELECT id, password_hash, name, email, phone_number, balance, credit_score, credit_limit, created_at 
 	FROM users 
 	WHERE id = ?;`
 	var user models.User
 
-	err := s.db.QueryRow(query, userID).Scan(&user.ID, &user.Name, &user.Email, &user.PhoneNumber, &user.Balance, &user.CreditScore, &user.CreditLimit, &user.CreatedAt)
+	err := s.db.QueryRow(query, userID).Scan(&user.ID, &user.PasswordHash, &user.Name, &user.Email, &user.PhoneNumber, &user.Balance, &user.CreditScore, &user.CreditLimit, &user.CreatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to retrieve full account parameters for user ID '%s': %w", userID, err)
 	}
