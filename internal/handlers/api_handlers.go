@@ -112,7 +112,7 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Map the form input data over to the structural Database model
-	newUser := models.User{
+	new_user := models.User{
 		ID:           input.ID,
 		PasswordHash: string(hashedPassword),
 		Name:         input.Name,
@@ -124,14 +124,14 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Pass the populated struct down to the database engine
-	err = h.store.CreateUser(&newUser)
+	err = h.store.CreateUser(&new_user)
 	if err != nil {
 		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 
 	// Send a successful response back out the window along with the created data
-	WriteJSON(w, http.StatusCreated, map[string]string{"status": "ledger user allocation committed successfully", "id": newUser.ID})
+	WriteJSON(w, http.StatusCreated, map[string]string{"status": "ledger user allocation committed successfully", "id": new_user.ID})
 }
 
 func (h *Handler) LoginUser(w http.ResponseWriter, r *http.Request) {
