@@ -175,6 +175,7 @@ func (h *Handler) GetPayment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Package the returned data struct into JSON and ship it over the wire
 	WriteJSON(w, http.StatusOK, payment)
 }
 
@@ -187,7 +188,21 @@ func (h *Handler) PayInstallment(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) ListInstallments(w http.ResponseWriter, r *http.Request) {
+	// Ensure that this endpoint only accepts GET requests
+	if r.Method != http.MethodGet {
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only GET requests are permitted to this route"})
+		return
+	}
 
+	// Query the database engine to retrieve a slice of all installments
+	installments, err := h.store.ListInstallments()
+	if err != nil {
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "There was an error in retrieving profiles"})
+		return
+	}
+
+	// Package the returned data struct into JSON and ship it over the wire
+	WriteJSON(w, http.StatusOK, installments)
 }
 
 func (h *Handler) ListOverdueInstallments(w http.ResponseWriter, r *http.Request) {
