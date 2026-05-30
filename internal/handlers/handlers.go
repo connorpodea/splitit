@@ -156,7 +156,7 @@ func (h *Handler) Pay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Initialize an empty User model struct to hold the incoming data
+	// Initialize an empty Payment model struct to hold the incoming data
 	var input models.Payment
 
 	// Read the JSON text out of the web request body and decode it into the Go struct
@@ -203,6 +203,31 @@ func (h *Handler) GetPayment(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) CreateBNPLLoan(w http.ResponseWriter, r *http.Request) {
+	// Ensure this endpoint only accepts POST requests
+	if r.Method != http.MethodPost {
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only POST requests are permitted to this route"})
+		return
+	}
+
+	// Initialize an empty Payment model struct to hold the incoming data
+	var input models.Payment
+
+	// Read the JSON text out of the web request body and decode it into the Go struct
+	err := json.NewDecoder(r.Body).Decode(&input)
+	if err != nil {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON request payload formatting"})
+		return
+	}
+
+	// Pass the populated struct down to the database engine
+	err = h.store.CreateBNPLLoan(&input)
+	if err != nil {
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to write the BNPL record to database"})
+		return
+	}
+
+	// Send a successful response back out the window along with the created data
+	WriteJSON(w, http.StatusOK, input)
 
 }
 
