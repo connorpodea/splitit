@@ -589,5 +589,32 @@ func (h *Handler) ListOutgoingPaymentRequests(w http.ResponseWriter, r *http.Req
 }
 
 func (h *Handler) UpdatePaymentRequestStatus(w http.ResponseWriter, r *http.Request) {
+	// Ensure this endpoint only accepts POST requests
+	if r.Method != http.MethodPost {
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only POST methods are permitted to this route"})
+		return
+	}
 
+	// Initialize a custom, empty struct to hold the incoming data
+	type Input struct {
+		PaymentID string `json:"payment_id"`
+		NewStatus string `json:"new_status"`
+	}
+	var input Input
+
+	// Read the JSON text out of the web request body and decode it into the variable
+	err := json.NewDecoder(r.Body).Decode(&input)
+	if err != nil {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON request payload formatting"})
+		return
+	}
+
+	// Pass the variable down to the database engine
+	err = h.store.UpdatePaymentRequestStatus(input.PaymentID, input.NewStatus)
+	if err != nil {
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+
+	// Send a successful response back out the window along with the created data
+	WriteJSON(w, http.StatusOK, input)
 }
