@@ -194,10 +194,10 @@ func (h *Handler) ListInstallments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Parse the user ID
-	userID := r.URL.Query().Get("id")
+	// Extract the user ID from the URL query parameters
+	userID := r.URL.Query().Get("user_id")
 	if userID == "" {
-		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Missing required URL query parameter: 'id'"})
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Missing required URL query parameter: 'user_id'"})
 		return
 	}
 
@@ -213,7 +213,28 @@ func (h *Handler) ListInstallments(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) ListOverdueInstallments(w http.ResponseWriter, r *http.Request) {
+	// Ensure that this endpoint only accepts GET requests
+	if r.Method != http.MethodGet {
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only GET requests are permitted to this route"})
+		return
+	}
 
+	// Extract the user ID from the URL query parameters
+	userID := r.URL.Query().Get("user_id")
+	if userID == "" {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Missing required URL query parameter: 'user_id'"})
+		return
+	}
+
+	// Query the database engine to retrieve a slice of all overdue installments
+	installments, err := h.store.ListOverdueInstallments(userID)
+	if err != nil {
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "There was an error in retrieving this users overdue installments"})
+		return
+	}
+
+	// Package the returned data stuct into JSON and ship it over the wire
+	WriteJSON(w, http.StatusOK, installments)
 }
 
 func (h *Handler) SendFriendRequest(w http.ResponseWriter, r *http.Request) {
