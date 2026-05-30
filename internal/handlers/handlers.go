@@ -317,7 +317,30 @@ func (h *Handler) ListOverdueInstallments(w http.ResponseWriter, r *http.Request
 }
 
 func (h *Handler) SendFriendRequest(w http.ResponseWriter, r *http.Request) {
+	// Ensure this endpoint only accepts POST requests
+	if r.Method != http.MethodPost {
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only POST requests are permitted to this route"})
+		return
+	}
 
+	// Initialize an empty FriendRequest model struct to hold the incoming data
+	var input models.FriendRequest
+
+	// Read the JSON text out of the web request body and decode it into the Go struct
+	err := json.NewDecoder(r.Body).Decode(&input)
+	if err != nil {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON request payload formatting"})
+		return
+	}
+
+	// Pass the populated struct down to the database engine
+	err = h.store.SendFriendRequest(&input)
+	if err != nil {
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to write the BNPL record to database"})
+	}
+
+	// Send a successful response back out the window along with the created data
+	WriteJSON(w, http.StatusOK, input)
 }
 
 func (h *Handler) ListIncomingFriendRequests(w http.ResponseWriter, r *http.Request) {
