@@ -26,6 +26,7 @@ func New(s *store.Store) *Handler {
 func (h *Handler) RegisterRoutes() {
 	// Users & Profiles
 	http.HandleFunc("/users/create", h.CreateUser)
+	http.HandleFunc("/users/login", h.LoginUser)
 	http.HandleFunc("/users/get", h.GetUser)
 	http.HandleFunc("/users/list", h.ListUsers)
 	http.HandleFunc("/profiles/list", h.ListProfiles)
@@ -158,17 +159,19 @@ func (h *Handler) LoginUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Issue Cookie Wristband on absolute match success
-	cookie := &http.Cookie{
-		Name:     "session_user_id",
-		Value:    user.ID,
-		Path:     "/",
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-	}
-	http.SetCookie(w, cookie)
+    cookie := &http.Cookie{
+        Name:     "session_user_id",
+        Value:    user.ID,
+        Path:     "/",
+        HttpOnly: true,
+        SameSite: http.SameSiteLaxMode,
+    }
+    http.SetCookie(w, cookie)
 
-	w.Header().Set("Content-Type", "text/html")
-	w.Write([]byte(`<div class="text-green-400 font-mono text-sm">✓ Auth Success. Welcome, ` + user.Name + `!</div>`))
+    // This special header tells HTMX: "The login was completely valid. Reload the main domain URL path 
+    // so our server can read the new session wristband cookie and display the dashboard view."
+    w.Header().Set("HX-Redirect", "/")
+    w.WriteHeader(http.StatusOK)
 }
 
 func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
