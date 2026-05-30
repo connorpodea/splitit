@@ -20,6 +20,40 @@ func New(s *store.Store) *Handler {
 	return &Handler{store: s}
 }
 
+// RegisterRoutes attaches all application endpoints to Go's standard HTTP router.
+// This keeps main.go perfectly clean and centralized.
+func (h *Handler) RegisterRoutes() {
+	// Users & Profiles
+	http.HandleFunc("/users/create", h.CreateUser)
+	http.HandleFunc("/users/get", h.GetUser)
+	http.HandleFunc("/users/list", h.ListUsers)
+	http.HandleFunc("/profiles/list", h.ListProfiles)
+	http.HandleFunc("/profiles/get", h.GetProfile)
+
+	// Payments
+	http.HandleFunc("/payments/pay", h.Pay)
+	http.HandleFunc("/payments/get", h.GetPayment)
+	http.HandleFunc("/payments/request/create", h.CreatePaymentRequest)
+	http.HandleFunc("/payments/request/incoming", h.ListIncomingPaymentRequests)
+	http.HandleFunc("/payments/request/outgoing", h.ListOutgoingPaymentRequests)
+	http.HandleFunc("/payments/request/update", h.UpdatePaymentRequestStatus)
+
+	// BNPL Loans
+	http.HandleFunc("/bnpl/loan/create", h.CreateBNPLLoan)
+	http.HandleFunc("/bnpl/installment/pay", h.PayInstallment)
+	http.HandleFunc("/bnpl/installments/list", h.ListInstallments)
+	http.HandleFunc("/bnpl/installments/overdue", h.ListOverdueInstallments)
+
+	// Friends System
+	http.HandleFunc("/friends/request/send", h.SendFriendRequest)
+	http.HandleFunc("/friends/request/incoming", h.ListIncomingFriendRequests)
+	http.HandleFunc("/friends/request/outgoing", h.ListOutgoingFriendRequests)
+	http.HandleFunc("/friends/request/accept", h.AcceptFriendRequest)
+	http.HandleFunc("/friends/request/decline", h.DeclineFriendRequest)
+	http.HandleFunc("/friends/remove", h.RemoveFriendMutual)
+	http.HandleFunc("/friends/list", h.ListFriends)
+}
+
 // WriteJSON formats and flushes a structural data payload over an active HTTP connection.
 // 'status' takes standard HTTP integer codes (e.g., 200, 400), and 'data' accepts any struct type.
 func WriteJSON(w http.ResponseWriter, status int, data any) {
