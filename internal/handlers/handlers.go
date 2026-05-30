@@ -6,6 +6,7 @@ import (
 
 	"github.com/connorpodea/splitit/internal/models"
 	"github.com/connorpodea/splitit/internal/store"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // Handler isolates our web API server logic from our data storage layer.
@@ -68,24 +69,50 @@ func WriteJSON(w http.ResponseWriter, status int, data any) {
 }
 
 func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
-	// Enforce that this endpoint only accepts POST requests (writing data)
+	// Ensure that this endpoint only accepts POST requests
 	if r.Method != http.MethodPost {
 		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only POST requests are permitted on this route"})
 		return
 	}
 
-	// Initialize an empty User model struct to hold the incoming data
-	var input models.User
+	// Initialize a custom, empty struct to hold the incoming data
+	type RegistrationInput struct {
+		ID          string `json:"id"`
+		Password    string `json:"password"`
+		Name        string `json:"name"`
+		Email       string `json:"email"`
+		PhoneNumber string `json:"phone_number"`
+	}
+	var input RegistrationInput
 
 	// Read the JSON text out of the web request body and decode it into the Go struct
 	err := json.NewDecoder(r.Body).Decode(&input)
-	if err != nil {
+	if err != nil || input.Password == "" {
 		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON request payload formatting"})
 		return
 	}
 
+	// Turn plain text password into a non-reversible cryptographic hash (bcrypt.DefaultCost tells it to scramble the password 14 times)
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(input.Password), bcrypt.DefaultCost)
+	if err != nil {
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to protect password"})
+		return
+	}
+
+	// Map the form input data over to the structural Database model
+	newUser := models.User{
+		ID:           input.ID,
+		PasswordHash: string(hashedPassword),
+		Name:         input.Name,
+		Email:        input.Email,
+		PhoneNumber:  input.PhoneNumber,
+		Balance:      0.00,
+		CreditScore:  50,
+		CreditLimit:  1000.00,
+	}
+
 	// Pass the populated struct down to the database engine
-	err = h.store.CreateUser(&input)
+	err = h.store.CreateUser(&newUser)
 	if err != nil {
 		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
@@ -95,8 +122,57 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusCreated, input)
 }
 
+func (h *Handler) LoginUser(w http.ResponseWriter, r *http.Request) {
+	// Ensure that this endpoint only accepts POST requests
+	if r.Method != http.MethodPost {
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only POST requests are permitted on this route"})
+		return
+	}
+
+	// Initialize a custom, empty struct to hold the incoming data
+	type LoginInput struct {
+		ID       string `json:"id"`
+		Password string `json:"password"`
+	}
+	var input LoginInput
+
+	// Read the JSON text out of the web request body and decode it into the Go struct
+	err := json.NewDecoder(r.Body).Decode(&input)
+	if err != nil {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON request payload formatting"})
+		return
+	}
+
+	// Look up the user by ID
+	user, err := h.store.GetUser(input.ID)
+	if err != nil {
+		WriteJSON(w, http.StatusNotFound, map[string]string{"error": "Invalid User ID or password"})
+		return
+	}
+
+	// Compare the password to the currently stored password hash
+	err = bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(input.Password))
+	if err != nil {
+		WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "Invalid User ID or password"})
+		return
+	}
+
+	// Issue Cookie Wristband on absolute match success
+	cookie := &http.Cookie{
+		Name:     "session_user_id",
+		Value:    user.ID,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	}
+	http.SetCookie(w, cookie)
+
+	w.Header().Set("Content-Type", "text/html")
+	w.Write([]byte(`<div class="text-green-400 font-mono text-sm">✓ Auth Success. Welcome, ` + user.Name + `!</div>`))
+}
+
 func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
-	// Enforce that this endpoint only accepts GET requests (reading data)
+	// Ensure that this endpoint only accepts GET requests
 	if r.Method != http.MethodGet {
 		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only GET requests are permitted on this route"})
 		return
@@ -123,7 +199,7 @@ func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
-	// Enforce that this endpoint only accepts GET requests
+	// Ensure that this endpoint only accepts GET requests
 	if r.Method != http.MethodGet {
 		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only GET requests are permitted to this route"})
 		return
@@ -141,7 +217,7 @@ func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) ListProfiles(w http.ResponseWriter, r *http.Request) {
-	// Enforce that this endpoint only accepts GET requests
+	// Ensure that this endpoint only accepts GET requests
 	if r.Method != http.MethodGet {
 		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only GET requests are permitted to this route"})
 		return
