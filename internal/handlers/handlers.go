@@ -194,10 +194,17 @@ func (h *Handler) ListInstallments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Parse the user ID
+	userID := r.URL.Query().Get("id")
+	if userID == "" {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Missing required URL query parameter: 'id'"})
+		return
+	}
+
 	// Query the database engine to retrieve a slice of all installments
-	installments, err := h.store.ListInstallments()
+	installments, err := h.store.ListInstallments(userID)
 	if err != nil {
-		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "There was an error in retrieving profiles"})
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "There was an error in retrieving this users installments"})
 		return
 	}
 
