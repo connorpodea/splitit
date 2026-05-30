@@ -53,7 +53,7 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	// Pass the populated struct down to the database engine
 	err = h.store.CreateUser(&input)
 	if err != nil {
-		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 
@@ -169,7 +169,7 @@ func (h *Handler) Pay(w http.ResponseWriter, r *http.Request) {
 	// Pass the populated struct down to the database engine
 	err = h.store.Pay(&input)
 	if err != nil {
-		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 
@@ -222,12 +222,12 @@ func (h *Handler) CreateBNPLLoan(w http.ResponseWriter, r *http.Request) {
 	// Pass the populated struct down to the database engine
 	err = h.store.CreateBNPLLoan(&input)
 	if err != nil {
-		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 
 	// Send a successful response back out the window along with the created data
-	WriteJSON(w, http.StatusOK, input)
+	WriteJSON(w, http.StatusCreated, input)
 }
 
 func (h *Handler) PayInstallment(w http.ResponseWriter, r *http.Request) {
@@ -256,7 +256,7 @@ func (h *Handler) PayInstallment(w http.ResponseWriter, r *http.Request) {
 	// Pass the populated struct down to the database engine
 	err = h.store.PayInstallment(input.InstallmentID, input.PaymentID, input.UserID, input.Amount)
 	if err != nil {
-		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 
@@ -334,11 +334,12 @@ func (h *Handler) SendFriendRequest(w http.ResponseWriter, r *http.Request) {
 	// Pass the populated struct down to the database engine
 	err = h.store.SendFriendRequest(&input)
 	if err != nil {
-		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
 	}
 
 	// Send a successful response back out the window along with the created data
-	WriteJSON(w, http.StatusOK, input)
+	WriteJSON(w, http.StatusCreated, input)
 }
 
 func (h *Handler) ListIncomingFriendRequests(w http.ResponseWriter, r *http.Request) {
@@ -381,7 +382,7 @@ func (h *Handler) ListOutgoingFriendRequests(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Query the database engine for this users outgoing friend requests
-	requests, err := h.store.ListIncomingFriendRequests(userID)
+	requests, err := h.store.ListOutgoingFriendRequests(userID)
 	if err != nil {
 		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -416,7 +417,8 @@ func (h *Handler) AcceptFriendRequest(w http.ResponseWriter, r *http.Request) {
 	// Pass the populated struct down to the database engine
 	err = h.store.AcceptFriendRequest(input.RequestID, input.SenderID, input.ReceiverID)
 	if err != nil {
-		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
 	}
 
 	// Send a successful response back out the window along with the created data
@@ -446,7 +448,7 @@ func (h *Handler) DeclineFriendRequest(w http.ResponseWriter, r *http.Request) {
 	// Pass the variable down to the database engine
 	err = h.store.DeclineFriendRequest(input.RequestID)
 	if err != nil {
-		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 
@@ -478,7 +480,8 @@ func (h *Handler) RemoveFriendMutual(w http.ResponseWriter, r *http.Request) {
 	// Pass the variable down to the database engine
 	err = h.store.RemoveFriendMutual(input.UserID, input.FriendID)
 	if err != nil {
-		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
 	}
 
 	// Send a successful response back out the window along with the created data
@@ -510,7 +513,7 @@ func (h *Handler) ListFriends(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, friends)
 }
 
-func (h *Handler) CreatePaymentRequst(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) CreatePaymentRequest(w http.ResponseWriter, r *http.Request) {
 	// Ensure this endpoint only accepts POST requests
 	if r.Method != http.MethodPost {
 		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only POST methods are permitted to this route"})
@@ -530,12 +533,12 @@ func (h *Handler) CreatePaymentRequst(w http.ResponseWriter, r *http.Request) {
 	// Pass the variable down to the database engine
 	err = h.store.CreatePaymentRequest(&input)
 	if err != nil {
-		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 
 	// Send a successful response back out the window along with the created data
-	WriteJSON(w, http.StatusOK, input)
+	WriteJSON(w, http.StatusCreated, input)
 }
 
 func (h *Handler) ListIncomingPaymentRequests(w http.ResponseWriter, r *http.Request) {
@@ -612,7 +615,8 @@ func (h *Handler) UpdatePaymentRequestStatus(w http.ResponseWriter, r *http.Requ
 	// Pass the variable down to the database engine
 	err = h.store.UpdatePaymentRequestStatus(input.PaymentID, input.NewStatus)
 	if err != nil {
-		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
 	}
 
 	// Send a successful response back out the window along with the created data
