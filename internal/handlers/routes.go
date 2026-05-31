@@ -7,6 +7,7 @@ func (h *Handler) RegisterRoutes() {
 	// Users & Profiles
 	http.HandleFunc("/users/create", h.CreateUser)
 	http.HandleFunc("/users/login", h.LoginUser)
+	http.HandleFunc("/users/logout", h.Logout)
 	http.HandleFunc("/users/get", h.GetUser)
 	http.HandleFunc("/users/list", h.ListUsers)
 	http.HandleFunc("/profiles/list", h.ListProfiles)
@@ -35,6 +36,8 @@ func (h *Handler) RegisterRoutes() {
 	http.HandleFunc("/friends/remove", h.RemoveFriendMutual)
 	http.HandleFunc("/friends/list", h.ListFriends)
 
-	// UI
+	// UI Content Screens
 	http.HandleFunc("/ui/initial-view", h.GetInitialView)
+	http.HandleFunc("/ui/register-view", h.GetRegistrationView)
+	http.HandleFunc("/ui/dashboard-view", h.GetDashboardView) // Add this line
 }

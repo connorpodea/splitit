@@ -790,3 +790,24 @@ func (h *Handler) UpdatePaymentRequestStatus(w http.ResponseWriter, r *http.Requ
 	// Send a successful response back out the window along with the created data
 	WriteJSON(w, http.StatusOK, input)
 }
+
+// Logout clears the session cookie, signing the user out.
+// Browsers persist the cookie until we explicitly expire it with MaxAge=-1.
+func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only POST requests are permitted on this route"})
+		return
+	}
+
+	expired := &http.Cookie{
+		Name:     "session_user_id",
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	}
+	http.SetCookie(w, expired)
+
+	WriteJSON(w, http.StatusOK, map[string]bool{"success": true})
+}

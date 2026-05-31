@@ -39,9 +39,10 @@ func main() {
 	fs := http.FileServer(http.Dir("./ui"))
 	http.Handle("/static/", http.StripPrefix("/static/", fs))
 
-	// 5. HOMEPAGE ROUTER
+	// 5. HOMEPAGE ROUTER (UPDATED FOR HTMX CANVAS LAZY-LOADING)
 	// What: Watches for someone opening your main web address (http://localhost:8080/).
-	// Why: It reads your "index.html" canvas file from disk and streams it straight to the user's browser.
+	// Why: Streams an empty HTML framework containing Tailwind CSS and HTMX. The container instantly
+	//      calls our UI router fork endpoint to fetch either the Login Form or the main Dashboard view.
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		// Strict Check: Go's standard "/" path is a wildcard matching any unregistered URL.
 		// If a user types a broken URL, this returns a clean 404 Error instead of breaking your homepage.
@@ -49,7 +50,38 @@ func main() {
 			http.NotFound(w, r)
 			return
 		}
-		http.ServeFile(w, r, "./ui/index.html")
+
+		// Inform the network layer that the upcoming data transmission is standard web markup text
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusOK)
+
+		// Create the global layout outer shell.
+		// It establishes our dependencies and utilizes HTMX triggers to load views seamlessly.
+		master_canvas := `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SplitIt - Ledger Terminal</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <script src="https://unpkg.com/htmx.org/dist/ext/json-enc.js"></script>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex items-center justify-center p-4 antialiased">
+
+    <div id="main-application-viewport" 
+         hx-get="/ui/initial-view" 
+         hx-trigger="load" 
+         class="w-full max-w-6xl">
+         <div class="text-center font-mono text-xs text-gray-500 animate-pulse">
+             Initializing secure ledger session connection...
+         </div>
+    </div>
+
+</body>
+</html>`
+
+		w.Write([]byte(master_canvas))
 	})
 
 	// 6. START NETWORK LISTEN LOOP
