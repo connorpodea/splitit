@@ -37,8 +37,12 @@ func (h *Handler) GetInitialView(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		incomingRequests = []*models.PaymentRequest{}
 	}
+	friendRequests, err := h.store.ListIncomingFriendRequests(user.ID)
+	if err != nil {
+		friendRequests = []*models.FriendRequest{}
+	}
 
-	writeHTML(w, dashboardHTML(user, friends, installments, overdueInstallments, incomingRequests))
+	writeHTML(w, dashboardHTML(user, friends, installments, overdueInstallments, incomingRequests, friendRequests))
 }
 
 func (h *Handler) GetRegistrationView(w http.ResponseWriter, r *http.Request) {
@@ -57,7 +61,6 @@ func (h *Handler) GetDashboardView(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Dynamic database queries with explicit error recovery fallbacks
 	friends, err := h.store.ListFriends(user.ID)
 	if err != nil {
 		friends = []*models.Profile{}
@@ -74,8 +77,12 @@ func (h *Handler) GetDashboardView(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		incomingRequests = []*models.PaymentRequest{}
 	}
+	friendRequests, err := h.store.ListIncomingFriendRequests(user.ID)
+	if err != nil {
+		friendRequests = []*models.FriendRequest{}
+	}
 
-	writeHTML(w, dashboardHTML(user, friends, installments, overdueInstallments, incomingRequests))
+	writeHTML(w, dashboardHTML(user, friends, installments, overdueInstallments, incomingRequests, friendRequests))
 }
 
 func writeHTML(w http.ResponseWriter, body string) {
@@ -138,7 +145,7 @@ func profileDisplayName(p *models.Profile) string {
 // DASHBOARD SHELL
 // ---------------------------------------------------------------------------
 
-func dashboardHTML(user *models.User, friends []*models.Profile, installments []*models.Installment, overdueInstallments []*models.Installment, incomingRequests []*models.PaymentRequest) string {
+func dashboardHTML(user *models.User, friends []*models.Profile, installments []*models.Installment, overdueInstallments []*models.Installment, incomingRequests []*models.PaymentRequest, friendRequests []*models.FriendRequest) string {
 	name := displayName(user)
 	avatar := initials(name)
 	handle := user.ID
@@ -159,6 +166,7 @@ func dashboardHTML(user *models.User, friends []*models.Profile, installments []
 		availableCredit = 0
 	}
 	scoreLabel := creditScoreLabel(user.CreditScore)
+	friendReqCount := len(friendRequests)
 
 	return dashboardStyles() + `
 <div id="app-root" class="app-shell">
@@ -170,9 +178,19 @@ func dashboardHTML(user *models.User, friends []*models.Profile, installments []
         <span class="brand">split<span>it</span></span>
       </button>
       <div class="topbar-actions">
-        <button class="icon-btn" aria-label="Notifications" onclick="showToast('No new notifications')">
+        <button class="icon-btn" aria-label="Notifications" onclick="goView('social')" title="` + func() string {
+		if friendReqCount > 0 {
+			return fmt.Sprintf("%d pending friend request(s)", friendReqCount)
+		}
+		return "No new notifications"
+	}() + `">
           <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
-          <span class="dot"></span>
+          ` + func() string {
+		if friendReqCount > 0 {
+			return `<span style="position:absolute;top:6px;right:6px;width:16px;height:16px;border-radius:50%;background:#ef4444;border:2px solid #0f172a;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:#fff;font-family:'JetBrains Mono',monospace;">` + fmt.Sprintf("%d", friendReqCount) + `</span>`
+		}
+		return `<span class="dot"></span>`
+	}() + `
         </button>
         <button class="avatar-btn" id="profile-btn" onclick="goView('profile')" aria-label="Profile">` + avatar + `</button>
       </div>
@@ -225,7 +243,7 @@ func dashboardHTML(user *models.User, friends []*models.Profile, installments []
     <main class="content">
 ` + viewHome(name, user, overdueInstallments, installments, incomingRequests) + `
 ` + viewActivity(installments, overdueInstallments, incomingRequests) + `
-` + viewFriends(friends) + `
+` + viewFriends(friends, friendRequests) + `
 ` + viewProfile(user, avatar, name, handle, email, phone, friends, installments) + `
     </main>
   </div>
@@ -699,8 +717,48 @@ func viewActivity(installments []*models.Installment, overdueInstallments []*mod
 // FRIENDS / SOCIAL VIEW
 // ---------------------------------------------------------------------------
 
-func viewFriends(friends []*models.Profile) string {
+func viewFriends(friends []*models.Profile, friendRequests []*models.FriendRequest) string {
 	friendCount := len(friends)
+
+	// --- Incoming friend requests banner ---
+	requestsSection := ""
+	if len(friendRequests) > 0 {
+		plural := ""
+		if len(friendRequests) > 1 {
+			plural = "s"
+		}
+		rows := ""
+		for i, req := range friendRequests {
+			cls := avatarClass(i)
+			ini := strings.ToUpper(req.SenderID)
+			if len([]rune(ini)) > 2 {
+				ini = string([]rune(ini)[:2])
+			}
+			rows += `
+      <div style="display:flex;align-items:center;gap:12px;padding:12px 14px;border-bottom:1px solid var(--border-soft);" data-req-row="` + req.ID + `">
+        <div class="row-avatar ` + cls + `">` + ini + `</div>
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:14px;font-weight:600;color:var(--text);">@` + req.SenderID + `</div>
+          <div style="font-size:12px;color:var(--text-faint);">Wants to be friends</div>
+        </div>
+        <div style="display:flex;gap:6px;">
+          <button onclick="acceptFriendRequest('` + req.ID + `','` + req.SenderID + `')"
+            style="background:var(--emerald);color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">
+            Accept
+          </button>
+          <button onclick="declineFriendRequest('` + req.ID + `',this)"
+            style="background:var(--surface-3);color:var(--text-dim);border:1px solid var(--border);border-radius:8px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">
+            Decline
+          </button>
+        </div>
+      </div>`
+		}
+		requestsSection = `
+  <div style="margin-bottom:16px;">
+    <div style="font-size:11px;font-weight:700;color:var(--text-mute);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px;">` + fmt.Sprintf("%d", len(friendRequests)) + ` pending request` + plural + `</div>
+    <div class="card">` + rows + `</div>
+  </div>`
+	}
 
 	listContent := ""
 	if friendCount > 0 {
@@ -723,7 +781,7 @@ func viewFriends(friends []*models.Profile) string {
       Add friend
     </button>
   </div>
-
+` + requestsSection + `
   <div class="search-wrap">
     <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
     <input class="search-inp" type="search" placeholder="Search friends" oninput="filterFriends(this.value)" />
@@ -993,11 +1051,14 @@ func addFriendSheetHTML() string {
     <div class="sheet-handle"></div>
     <div class="sheet-title">Add friend</div>
     <div class="sheet-pane active" style="display:flex;">
-      <div>
-        <label class="modal-lbl">Their user ID</label>
-        <input class="modal-inp" id="addfriend-id-inp" type="text" placeholder="their_handle" autocomplete="off" />
+      <div class="search-wrap" style="margin-bottom:0;">
+        <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input class="search-inp" id="addfriend-search-inp" type="search" placeholder="Search by name or @handle…"
+               oninput="searchUsersToAdd(this.value)"
+               onfocus="initProfileSearch()"
+               autocomplete="off" />
       </div>
-      <button class="submit-btn" onclick="submitAddFriend()">Send friend request</button>
+      <div id="addfriend-results" style="display:flex;flex-direction:column;gap:8px;max-height:360px;overflow-y:auto;padding-top:4px;"></div>
     </div>
   </div>
 </div>`
@@ -1724,13 +1785,107 @@ func dashboardScript() string {
     );
   }
 
-  // --- Add friend ---------------------------------------------------------
-  function submitAddFriend() {
-    var id = document.getElementById('addfriend-id-inp').value.trim();
-    if (!id) { showToast('Please enter a user ID', 'warn'); return; }
+  // --- Add friend: live profile search -----------------------------------
+  var _allProfiles = null;
+  var _profilesLoading = false;
+
+  function initProfileSearch() {
+    if (_allProfiles !== null || _profilesLoading) return;
+    _profilesLoading = true;
+    document.getElementById('addfriend-results').innerHTML =
+      '<div style="color:var(--text-mute);font-size:13px;padding:8px 0;">Loading users…</div>';
+    fetch('/profiles/list', { credentials: 'same-origin' })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        _allProfiles = Array.isArray(data) ? data : [];
+        _profilesLoading = false;
+        searchUsersToAdd(document.getElementById('addfriend-search-inp').value);
+      })
+      .catch(function() {
+        _profilesLoading = false;
+        document.getElementById('addfriend-results').innerHTML =
+          '<div style="color:var(--rose-hi);font-size:13px;padding:8px 0;">Could not load users.</div>';
+      });
+  }
+
+  function searchUsersToAdd(q) {
+    var container = document.getElementById('addfriend-results');
+    if (!_allProfiles) { initProfileSearch(); return; }
+    q = (q || '').toLowerCase().trim();
+    var colors = ['av-indigo','av-amber','av-emerald','av-violet','av-cyan','av-pink'];
+    var matches = _allProfiles.filter(function(p) {
+      if (!q) return true;
+      return (p.id || '').toLowerCase().indexOf(q) !== -1 ||
+             (p.name || '').toLowerCase().indexOf(q) !== -1;
+    }).slice(0, 10);
+    if (matches.length === 0) {
+      container.innerHTML = '<div style="color:var(--text-mute);font-size:13px;padding:8px 0;">No users found.</div>';
+      return;
+    }
+    container.innerHTML = matches.map(function(p, i) {
+      var dname = p.name || p.id;
+      var r = Array.from(dname);
+      var ini = r.length >= 2 ? (r[0] + r[1]).toUpperCase() : r[0].toUpperCase();
+      var cls = colors[i % colors.length];
+      var safeName = dname.replace(/\\/g, '').replace(/'/g, '');
+      return '<div style="display:flex;align-items:center;gap:12px;padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:12px;">' +
+        '<div class="row-avatar ' + cls + '" style="width:36px;height:36px;font-size:12px;flex-shrink:0;">' + ini + '</div>' +
+        '<div style="flex:1;min-width:0;">' +
+          '<div style="font-size:14px;font-weight:600;color:var(--text);">' + dname + '</div>' +
+          '<div style="font-size:12px;color:var(--text-faint);">@' + p.id + '</div>' +
+        '</div>' +
+        '<button onclick="sendFriendRequestTo(\'' + p.id + '\',\'' + safeName + '\')" ' +
+          'style="background:var(--indigo);color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;flex-shrink:0;">Add</button>' +
+      '</div>';
+    }).join('');
+  }
+
+  function sendFriendRequestTo(id, name) {
     apiPost('/friends/request/send',
       { receiver_id: id },
-      function() { closeSheet('addfriend'); showToast('Friend request sent to @' + id); document.getElementById('addfriend-id-inp').value = ''; },
+      function() {
+        closeSheet('addfriend');
+        document.getElementById('addfriend-search-inp').value = '';
+        document.getElementById('addfriend-results').innerHTML = '';
+        showToast('Friend request sent to ' + name);
+      },
+      function(e) { showToast(e, 'warn'); }
+    );
+  }
+
+  // Reset search state when sheet closes so it re-fetches on next open
+  var _origCloseSheet = closeSheet;
+  closeSheet = function(which) {
+    _origCloseSheet(which);
+    if (which === 'addfriend') {
+      var inp = document.getElementById('addfriend-search-inp');
+      var res = document.getElementById('addfriend-results');
+      if (inp) inp.value = '';
+      if (res) res.innerHTML = '';
+    }
+  };
+
+  // --- Accept / Decline friend requests -----------------------------------
+  function acceptFriendRequest(requestID, senderID) {
+    apiPost('/friends/request/accept',
+      { request_id: requestID, sender_id: senderID },
+      function() { showToast('Friend request accepted'); setTimeout(function() { location.reload(); }, 800); },
+      function(e) { showToast(e, 'warn'); }
+    );
+  }
+
+  function declineFriendRequest(requestID, btn) {
+    apiPost('/friends/request/decline',
+      { request_id: requestID },
+      function() {
+        var row = document.querySelector('[data-req-row="' + requestID + '"]');
+        if (row) {
+          row.style.transition = 'opacity .2s';
+          row.style.opacity = '0';
+          setTimeout(function() { row.remove(); }, 200);
+        }
+        showToast('Request declined');
+      },
       function(e) { showToast(e, 'warn'); }
     );
   }
