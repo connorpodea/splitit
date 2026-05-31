@@ -245,6 +245,7 @@ func dashboardHTML(user *models.User) string {
 	avatar := initials(name)
 	handle := user.ID
 	email := user.Email
+	phone_number := user.PhoneNumber
 	if email == "" {
 		email = handle + "@splitit.app"
 	}
@@ -302,7 +303,7 @@ func dashboardHTML(user *models.User) string {
 ` + viewHome(name) + `
 ` + viewActivity() + `
 ` + viewFriends() + `
-` + viewProfile(user, avatar, name, handle, email) + `
+` + viewProfile(user, avatar, name, handle, email, phone_number) + `
     </main>
   </div>
 
@@ -687,6 +688,7 @@ func dashboardStyles() string {
   .profile-name { font-size: 22px; font-weight: 800; color: var(--text); letter-spacing: -0.02em; }
   .profile-handle { font-size: 13px; color: var(--text-mute); margin-top: 4px; }
   .profile-email { font-size: 13px; color: var(--text-faint); margin-top: 2px; }
+  .profile-phone_number { font-size: 13px; color: var(--text-faint); margin-top: 2px; }
 
   .score-card {
     background: linear-gradient(135deg, #1e1b4b 0%, #0f172a 100%);
@@ -1284,7 +1286,7 @@ func friendsRows() string {
 // PROFILE VIEW — user info, Splitit Score gauge, BNPL limit, stats, menu, sign out.
 // The Splitit Score sits here (not on Home) per the IA brief.
 // ---------------------------------------------------------------------------
-func viewProfile(_ *models.User, avatar, name, handle, email string) string {
+func viewProfile(_ *models.User, avatar, name, handle, email, phone_number string) string {
 	return `
 <section class="view" data-view="profile">
   <div class="profile-hero">
@@ -1292,6 +1294,7 @@ func viewProfile(_ *models.User, avatar, name, handle, email string) string {
     <div class="profile-name">` + name + `</div>
     <div class="profile-handle">@` + handle + `</div>
     <div class="profile-email">` + email + `</div>
+	<div class="profile-phone_number">` + phone_number + `</div>
   </div>
 
   <!-- Splitit Score (the renamed Credit Score) -->
