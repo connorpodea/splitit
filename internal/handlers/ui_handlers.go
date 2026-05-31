@@ -1,36 +1,50 @@
 package handlers
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 
 	"github.com/connorpodea/splitit/internal/models"
 )
 
-// GetInitialView is the entry route the master shell hits on page load.
-// It checks the session cookie and either returns the login form or the dashboard.
 func (h *Handler) GetInitialView(w http.ResponseWriter, r *http.Request) {
 	cookie, err := r.Cookie("session_user_id")
 	if err != nil || cookie.Value == "" {
 		writeHTML(w, loginHTML())
 		return
 	}
-
 	user, err := h.store.GetUser(cookie.Value)
 	if err != nil {
-		// Session points at a missing user (e.g. db reset). Fall back to login.
 		writeHTML(w, loginHTML())
 		return
 	}
-	writeHTML(w, dashboardHTML(user))
+
+	// Dynamic database queries with explicit error recovery fallbacks
+	friends, err := h.store.ListFriends(user.ID)
+	if err != nil {
+		friends = []*models.Profile{}
+	}
+	installments, err := h.store.ListInstallments(user.ID)
+	if err != nil {
+		installments = []*models.Installment{}
+	}
+	overdueInstallments, err := h.store.ListOverdueInstallments(user.ID)
+	if err != nil {
+		overdueInstallments = []*models.Installment{}
+	}
+	incomingRequests, err := h.store.ListIncomingPaymentRequests(user.ID)
+	if err != nil {
+		incomingRequests = []*models.PaymentRequest{}
+	}
+
+	writeHTML(w, dashboardHTML(user, friends, installments, overdueInstallments, incomingRequests))
 }
 
-// GetRegistrationView renders the standalone signup screen.
 func (h *Handler) GetRegistrationView(w http.ResponseWriter, r *http.Request) {
 	writeHTML(w, registerHTML())
 }
 
-// GetDashboardView is hit after a successful login.
 func (h *Handler) GetDashboardView(w http.ResponseWriter, r *http.Request) {
 	cookie, err := r.Cookie("session_user_id")
 	if err != nil || cookie.Value == "" {
@@ -42,19 +56,34 @@ func (h *Handler) GetDashboardView(w http.ResponseWriter, r *http.Request) {
 		writeHTML(w, loginHTML())
 		return
 	}
-	writeHTML(w, dashboardHTML(user))
+
+	// Dynamic database queries with explicit error recovery fallbacks
+	friends, err := h.store.ListFriends(user.ID)
+	if err != nil {
+		friends = []*models.Profile{}
+	}
+	installments, err := h.store.ListInstallments(user.ID)
+	if err != nil {
+		installments = []*models.Installment{}
+	}
+	overdueInstallments, err := h.store.ListOverdueInstallments(user.ID)
+	if err != nil {
+		overdueInstallments = []*models.Installment{}
+	}
+	incomingRequests, err := h.store.ListIncomingPaymentRequests(user.ID)
+	if err != nil {
+		incomingRequests = []*models.PaymentRequest{}
+	}
+
+	writeHTML(w, dashboardHTML(user, friends, installments, overdueInstallments, incomingRequests))
 }
 
-// writeHTML is a tiny helper so each handler isn't 4 boilerplate lines.
 func writeHTML(w http.ResponseWriter, body string) {
 	w.Header().Set("Content-Type", "text/html")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(body))
 }
 
-// initials derives "JD" from "Jane Doe" — first letter of first name,
-// first letter of last name. Single-word names fall back to the first two
-// characters. Empty inputs return a neutral "?".
 func initials(fullName string) string {
 	clean := strings.TrimSpace(fullName)
 	if clean == "" {
@@ -62,7 +91,6 @@ func initials(fullName string) string {
 	}
 	parts := strings.Fields(clean)
 	if len(parts) == 1 {
-		// Single-word name: take first two characters if available.
 		runes := []rune(parts[0])
 		if len(runes) >= 2 {
 			return strings.ToUpper(string(runes[0])) + strings.ToUpper(string(runes[1]))
@@ -74,8 +102,6 @@ func initials(fullName string) string {
 	return strings.ToUpper(string(first[0])) + strings.ToUpper(string(last[0]))
 }
 
-// displayName picks the most natural label for a user — their real name if set,
-// otherwise their handle.
 func displayName(u *models.User) string {
 	if strings.TrimSpace(u.Name) != "" {
 		return u.Name
@@ -83,9 +109,155 @@ func displayName(u *models.User) string {
 	return u.ID
 }
 
+func creditScoreLabel(score uint8) string {
+	switch {
+	case score >= 76:
+		return "Excellent"
+	case score >= 51:
+		return "Good"
+	case score >= 31:
+		return "Fair"
+	default:
+		return "Poor"
+	}
+}
+
+func avatarClass(i int) string {
+	classes := []string{"av-indigo", "av-amber", "av-emerald", "av-violet", "av-cyan", "av-pink"}
+	return classes[i%len(classes)]
+}
+
+func profileDisplayName(p *models.Profile) string {
+	if strings.TrimSpace(p.Name) != "" {
+		return p.Name
+	}
+	return p.ID
+}
+
+// ---------------------------------------------------------------------------
+// DASHBOARD SHELL
+// ---------------------------------------------------------------------------
+
+func dashboardHTML(user *models.User, friends []*models.Profile, installments []*models.Installment, overdueInstallments []*models.Installment, incomingRequests []*models.PaymentRequest) string {
+	name := displayName(user)
+	avatar := initials(name)
+	handle := user.ID
+	email := user.Email
+	phone := user.PhoneNumber
+	if email == "" {
+		email = handle + "@splitit.app"
+	}
+
+	var outstandingBNPL float64
+	for _, inst := range installments {
+		if !inst.IsPaid {
+			outstandingBNPL += inst.Amount
+		}
+	}
+	availableCredit := user.CreditLimit - outstandingBNPL
+	if availableCredit < 0 {
+		availableCredit = 0
+	}
+	scoreLabel := creditScoreLabel(user.CreditScore)
+
+	return dashboardStyles() + `
+<div id="app-root" class="app-shell">
+  <div id="toast"></div>
+
+  <header class="topbar">
+    <div class="topbar-inner">
+      <button class="brand-btn" data-tab="home" onclick="goView('home')" aria-label="Home">
+        <span class="brand">split<span>it</span></span>
+      </button>
+      <div class="topbar-actions">
+        <button class="icon-btn" aria-label="Notifications" onclick="showToast('No new notifications')">
+          <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+          <span class="dot"></span>
+        </button>
+        <button class="avatar-btn" id="profile-btn" onclick="goView('profile')" aria-label="Profile">` + avatar + `</button>
+      </div>
+    </div>
+  </header>
+
+  <div class="app-body">
+    <aside class="sidebar">
+      <nav class="side-nav">
+        <button class="side-link active" data-tab="home" onclick="goView('home')">
+          <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M3 12l9-9 9 9"/><path d="M5 10v10h14V10"/></svg>
+          Home
+        </button>
+        <button class="side-link" data-tab="activity" onclick="goView('activity')">
+          <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M3 12h4l3-9 4 18 3-9h4"/></svg>
+          Activity
+        </button>
+        <button class="side-link" data-tab="social" onclick="goView('social')">
+          <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          Social
+        </button>
+        <button class="side-link" data-tab="analytics" onclick="goView('analytics')">
+          <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 0 1 3 19.875v-6.75Z" /><path stroke-linecap="round" stroke-linejoin="round" d="M9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V8.625Z" /><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V4.125Z" /></svg>
+          Analytics
+        </button>
+        <button class="side-link" data-tab="wallet" onclick="goView('wallet')">
+          <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M21 12a2.25 2.25 0 0 0-2.25-2.25H15a3 3 0 1 1-6 0H5.25A2.25 2.25 0 0 0 3 12m18 0v6A2.25 2.25 0 0 1 18.75 20H5.25A2.25 2.25 0 0 1 3 18v-6m18 0V9A2.25 2.25 0 0 0 18.75 6.75H5.25A2.25 2.25 0 0 0 3 9v3M16.5 10.5a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5Z" /></svg>
+          Wallet
+        </button>
+        <button class="side-link" data-tab="profile" onclick="goView('profile')">
+          <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+          Profile
+        </button>
+        <button class="side-link" data-tab="settings" onclick="goView('settings')">
+          <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.43l-1.003.767a1.123 1.123 0 0 0-.417 1.03c.004.074.006.148.006.222 0 .074-.002.148-.006.222a1.123 1.123 0 0 0 .417 1.03l1.003.767a1.125 1.125 0 0 1 .26 1.43l-1.296 2.247a1.125 1.125 0 0 1-1.37.49l-1.216-.456a1.125 1.125 0 0 0-1.075.124c-.073.044-.146.087-.22.128c-.332.183-.582.495-.645.869l-.213 1.28c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281a1.125 1.125 0 0 0-.646-.87c-.074-.04-.148-.083-.22-.127a1.124 1.124 0 0 0-1.075-.124l-1.217.456a1.125 1.125 0 0 1-1.37-.49l-1.296-2.247a1.125 1.125 0 0 1 .26-1.43l1.003-.767a1.122 1.122 0 0 0 .417-1.03c-.004-.074-.006-.148-.006-.222 0-.074.002-.148.006-.222a1.122 1.122 0 0 0-.417-1.03l-1.003-.767a1.125 1.125 0 0 1-.26-1.43l1.296-2.247a1.125 1.125 0 0 1 1.37-.49l1.216.456c.356.133.751.072 1.076-.124.072-.041.146-.084.218-.128.332-.183.582-.495.646-.869l.213-1.28Z" /><circle cx="12" cy="12" r="3" /></svg>
+          Settings
+        </button>
+        <button class="side-link" onclick="signOut()" style="color: #fca5a5;">
+          <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+          Sign out
+        </button>
+      </nav>
+      <div class="side-promo">
+        <div class="promo-title">splitit Score</div>
+        <div class="promo-score"><span class="mono">` + fmt.Sprintf("%d", user.CreditScore) + `</span><span class="promo-small">/100</span></div>
+        <div class="promo-sub">` + scoreLabel + ` · BNPL limit $` + fmt.Sprintf("%.0f", user.CreditLimit) + `</div>
+      </div>
+    </aside>
+
+    <main class="content">
+` + viewHome(name, user, overdueInstallments, installments, incomingRequests) + `
+` + viewActivity(installments, overdueInstallments, incomingRequests) + `
+` + viewFriends(friends) + `
+` + viewProfile(user, avatar, name, handle, email, phone, friends, installments) + `
+    </main>
+  </div>
+
+  <nav class="tabbar">
+    <button class="tab active" data-tab="home" onclick="goView('home')">
+      <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M3 12l9-9 9 9"/><path d="M5 10v10h14V10"/></svg>
+      <span>Home</span>
+    </button>
+    <button class="tab" data-tab="activity" onclick="goView('activity')">
+      <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M3 12h4l3-9 4 18 3-9h4"/></svg>
+      <span>Activity</span>
+    </button>
+    <button class="tab" data-tab="social" onclick="goView('social')">
+      <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      <span>Social</span>
+    </button>
+    <button class="tab" data-tab="profile" onclick="goView('profile')">
+      <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+      <span>Profile</span>
+    </button>
+  </nav>
+
+` + paySheetHTML(friends, availableCredit) + `
+` + requestSheetHTML(friends) + `
+` + addFriendSheetHTML() + `
+` + dashboardScript() + `
+</div>`
+}
+
 // ---------------------------------------------------------------------------
 // LOGIN SCREEN
-// Kept close to the original since it tested well — small polish only.
 // ---------------------------------------------------------------------------
 func loginHTML() string {
 	return `
@@ -102,7 +274,6 @@ func loginHTML() string {
     .inp::placeholder { color: #475569; }
     .btn-main { width: 100%; background: #6366f1; color: #fff; border: none; border-radius: 12px; padding: 13px; font-size: 15px; font-weight: 600; cursor: pointer; transition: background 0.2s, transform 0.1s; letter-spacing: -0.01em; font-family: inherit; }
     .btn-main:hover { background: #4f46e5; }
-    .btn-main:active { transform: scale(0.98); }
     .btn-main:active { transform: scale(0.98); }
     .lbl { display: block; font-size: 11px; color: #64748b; margin-bottom: 6px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
   </style>
@@ -228,114 +399,613 @@ func registerHTML() string {
 }
 
 // ---------------------------------------------------------------------------
-// DASHBOARD
+// HOME VIEW
 // ---------------------------------------------------------------------------
-func dashboardHTML(user *models.User) string {
-	name := displayName(user)
-	avatar := initials(name)
-	handle := user.ID
-	email := user.Email
-	phone_number := user.PhoneNumber
-	if email == "" {
-		email = handle + "@splitit.app"
+
+func viewHome(name string, user *models.User, overdueInstallments []*models.Installment, installments []*models.Installment, incomingRequests []*models.PaymentRequest) string {
+	firstName := strings.Fields(name)
+	greet := "there"
+	if len(firstName) > 0 {
+		greet = firstName[0]
 	}
 
-	return dashboardStyles() + `
-<div id="app-root" class="app-shell">
-  <div id="toast"></div>
+	balanceWhole := int(user.Balance)
+	balanceCents := int((user.Balance-float64(balanceWhole))*100 + 0.5)
 
-  <header class="topbar">
-    <div class="topbar-inner">
-      <button class="brand-btn" data-tab="home" onclick="goView('home')" aria-label="Home">
-        <span class="brand">split<span>it</span></span>
-      </button>
-      <div class="topbar-actions">
-        <button class="icon-btn" aria-label="Notifications" onclick="showToast('No new notifications')">
-          <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
-          <span class="dot"></span>
-        </button>
-        <button class="avatar-btn" id="profile-btn" onclick="goView('profile')" aria-label="Profile">` + avatar + `</button>
+	var outstandingBNPL float64
+	splitIDs := make(map[string]struct{})
+	for _, inst := range installments {
+		if !inst.IsPaid {
+			outstandingBNPL += inst.Amount
+			splitIDs[inst.PaymentID] = struct{}{}
+		}
+	}
+	activeSplits := len(splitIDs)
+
+	overdueCount := len(overdueInstallments)
+	overdueStatClass := "qstat"
+	overdueStatVal := "0 bills"
+	if overdueCount > 0 {
+		overdueStatClass = "qstat warn"
+		overdueStatVal = fmt.Sprintf("%d bills", overdueCount)
+	}
+
+	activeCount := 0
+	for _, inst := range installments {
+		if !inst.IsPaid {
+			isOverdue := false
+			for _, ov := range overdueInstallments {
+				if ov.ID == inst.ID {
+					isOverdue = true
+					break
+				}
+			}
+			if !isOverdue {
+				activeCount++
+			}
+		}
+	}
+
+	// Build recent activity rows — incoming requests first, then installments, cap at 5.
+	recentRows := ""
+	count := 0
+	for i, req := range incomingRequests {
+		if count >= 5 {
+			break
+		}
+		cls := avatarClass(i)
+		ini := strings.ToUpper(req.RequesterID)
+		if len([]rune(ini)) > 2 {
+			ini = string([]rune(ini)[:2])
+		}
+		date := req.CreatedAt
+		if len(date) >= 10 {
+			date = date[:10]
+		}
+		recentRows += `
+    <div class="row">
+      <div class="row-avatar ` + cls + `">` + ini + `</div>
+      <div class="row-body">
+        <div class="row-title"><b>@` + req.RequesterID + `</b> requested from <b>you</b></div>
+        <div class="row-sub">` + req.Note + `</div>
       </div>
+      <div class="row-right"><div class="row-amt req mono">$` + fmt.Sprintf("%.2f", req.Amount) + `</div><div class="row-time">` + date + `</div></div>
+    </div>`
+		count++
+	}
+	for i, inst := range installments {
+		if count >= 5 {
+			break
+		}
+		cls := avatarClass(i)
+		statusLabel := "Due " + inst.DueDate
+		amtClass := "bnpl"
+		if inst.IsPaid {
+			statusLabel = "Paid"
+			amtClass = "pos"
+		}
+		recentRows += `
+    <div class="row">
+      <div class="row-avatar ` + cls + `">BN</div>
+      <div class="row-body">
+        <div class="row-title"><b>BNPL</b> installment <span class="pill">Pay-in-4</span></div>
+        <div class="row-sub">` + statusLabel + `</div>
+      </div>
+      <div class="row-right"><div class="row-amt ` + amtClass + ` mono">$` + fmt.Sprintf("%.2f", inst.Amount) + `</div><div class="row-time">` + inst.DueDate + `</div></div>
+    </div>`
+		count++
+	}
+	if recentRows == "" {
+		recentRows = `
+    <div style="text-align:center; padding:28px 16px; color:var(--text-mute); font-size:13px;">No recent activity yet.</div>`
+	}
+
+	return `
+<section class="view active" data-view="home">
+  <div class="greeting" style="font-size:14px; color:var(--text-mute); margin-bottom:14px;">Welcome back, <b style="color:var(--text);">` + greet + `</b></div>
+
+  <div class="hero">
+    <div class="hero-label">Available balance</div>
+    <div class="hero-amount mono">$` + fmt.Sprintf("%d", balanceWhole) + `<span class="cents">.` + fmt.Sprintf("%02d", balanceCents) + `</span></div>
+    <div class="hero-meta">
+      <span><b>$` + fmt.Sprintf("%.2f", outstandingBNPL) + `</b> outstanding</span>
+      <span style="opacity:.4;">·</span>
+      <span><b>` + fmt.Sprintf("%d", activeSplits) + `</b> active splits</span>
     </div>
-  </header>
-
-  <div class="app-body">
-    <aside class="sidebar">
-      <nav class="side-nav">
-        <button class="side-link active" data-tab="home" onclick="goView('home')">
-          <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M3 12l9-9 9 9"/><path d="M5 10v10h14V10"/></svg>
-          Home
-        </button>
-        <button class="side-link" data-tab="activity" onclick="goView('activity')">
-          <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M3 12h4l3-9 4 18 3-9h4"/></svg>
-          Activity
-        </button>
-        <button class="side-link" data-tab="social" onclick="goView('social')">
-          <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-          Social
-        </button>
-        <button class="side-link" data-tab="analytics" onclick="goView('analytics')">
-          <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 0 1 3 19.875v-6.75Z" /><path stroke-linecap="round" stroke-linejoin="round" d="M9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V8.625Z" /><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V4.125Z" /></svg>
-          Analytics
-        </button>
-		<button class="side-link" data-tab="wallet" onclick="goView('wallet')">
-          <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M21 12a2.25 2.25 0 0 0-2.25-2.25H15a3 3 0 1 1-6 0H5.25A2.25 2.25 0 0 0 3 12m18 0v6A2.25 2.25 0 0 1 18.75 20H5.25A2.25 2.25 0 0 1 3 18v-6m18 0V9A2.25 2.25 0 0 0 18.75 6.75H5.25A2.25 2.25 0 0 0 3 9v3M16.5 10.5a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5Z" /></svg>
-          Wallet
-		</button>
-        <button class="side-link" data-tab="profile" onclick="goView('profile')">
-          <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-          Profile
-        </button>
-		<button class="side-link" data-tab="settings" onclick="goView('settings')">
-          <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.43l-1.003.767a1.123 1.123 0 0 0-.417 1.03c.004.074.006.148.006.222 0 .074-.002.148-.006.222a1.123 1.123 0 0 0 .417 1.03l1.003.767a1.125 1.125 0 0 1 .26 1.43l-1.296 2.247a1.125 1.125 0 0 1-1.37.49l-1.216-.456a1.125 1.125 0 0 0-1.075.124c-.073.044-.146.087-.22.128c-.332.183-.582.495-.645.869l-.213 1.28c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281a1.125 1.125 0 0 0-.646-.87c-.074-.04-.148-.083-.22-.127a1.124 1.124 0 0 0-1.075-.124l-1.217.456a1.125 1.125 0 0 1-1.37-.49l-1.296-2.247a1.125 1.125 0 0 1 .26-1.43l1.003-.767a1.122 1.122 0 0 0 .417-1.03c-.004-.074-.006-.148-.006-.222 0-.074.002-.148.006-.222a1.122 1.122 0 0 0-.417-1.03l-1.003-.767a1.125 1.125 0 0 1-.26-1.43l1.296-2.247a1.125 1.125 0 0 1 1.37-.49l1.216.456c.356.133.751.072 1.076-.124.072-.041.146-.084.218-.128.332-.183.582-.495.646-.869l.213-1.28Z" /><circle cx="12" cy="12" r="3" /></svg>
-          Settings
-		</button>
-		<button class="side-link" onclick="signOut()" style="color: #fca5a5;">
-  		  <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-  		  Sign out
-		</button>
-      </nav>
-      <div class="side-promo">
-        <div class="promo-title">splitit Score</div>
-        <div class="promo-score"><span class="mono">76</span><span class="promo-small">/100</span></div>
-        <div class="promo-sub">Excellent · BNPL limit $1,500</div>
-      </div>
-    </aside>
-
-    <main class="content">
-` + viewHome(name) + `
-` + viewActivity() + `
-` + viewFriends() + `
-` + viewProfile(user, avatar, name, handle, email, phone_number) + `
-    </main>
   </div>
 
-  <nav class="tabbar">
-    <button class="tab active" data-tab="home" onclick="goView('home')">
-      <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M3 12l9-9 9 9"/><path d="M5 10v10h14V10"/></svg>
-      <span>Home</span>
+  <div class="actions">
+    <button class="action req" onclick="openSheet('request')">
+      <span class="ico"><svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 5v14"/><path d="M5 12h14"/></svg></span>
+      <span class="lbl-stack"><b>Request</b><small>Ask a friend</small></span>
     </button>
-    <button class="tab" data-tab="activity" onclick="goView('activity')">
-      <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M3 12h4l3-9 4 18 3-9h4"/></svg>
-      <span>Activity</span>
+    <button class="action pay" onclick="openSheet('pay')">
+      <span class="ico"><svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></span>
+      <span class="lbl-stack"><b>Pay</b><small>Send · BNPL</small></span>
     </button>
-    <button class="tab" data-tab="social" onclick="goView('social')">
-      <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-      <span>Social</span>
-    </button>
-    <button class="tab" data-tab="profile" onclick="goView('profile')">
-      <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-      <span>Profile</span>
-    </button>
-  </nav>
+  </div>
 
-` + paySheetHTML() + `
-` + requestSheetHTML() + `
-` + dashboardScript() + `
+  <div class="quick-strip">
+    <button class="` + overdueStatClass + `" onclick="goView('activity', 'overdue')">
+      <div>
+        <div class="qstat-label">Overdue</div>
+        <div class="qstat-val mono">` + overdueStatVal + `</div>
+      </div>
+      <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
+    </button>
+    <button class="qstat" onclick="goView('activity', 'active')">
+      <div>
+        <div class="qstat-label">Active plans</div>
+        <div class="qstat-val mono">` + fmt.Sprintf("%d", activeCount) + `</div>
+      </div>
+      <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
+    </button>
+  </div>
+
+  <div class="section-row">
+    <h2>Recent activity</h2>
+    <button class="linklike" onclick="goView('activity')">See all</button>
+  </div>
+  <div class="card">` + recentRows + `</div>
+</section>
+`
+}
+
+// ---------------------------------------------------------------------------
+// ACTIVITY VIEW
+// ---------------------------------------------------------------------------
+
+func viewActivity(installments []*models.Installment, overdueInstallments []*models.Installment, incomingRequests []*models.PaymentRequest) string {
+	// Build overdue ID set for fast lookup.
+	overdueIDs := make(map[string]bool)
+	for _, inst := range overdueInstallments {
+		overdueIDs[inst.ID] = true
+	}
+
+	// --- Payments pane: incoming payment requests ---
+	paymentsRows := ""
+	for i, req := range incomingRequests {
+		cls := avatarClass(i)
+		ini := strings.ToUpper(req.RequesterID)
+		if len([]rune(ini)) > 2 {
+			ini = string([]rune(ini)[:2])
+		}
+		date := req.CreatedAt
+		if len(date) >= 10 {
+			date = date[:10]
+		}
+		statusLabel := req.Note
+		if statusLabel == "" {
+			statusLabel = req.Status
+		} else {
+			statusLabel += " · " + req.Status
+		}
+		paymentsRows += `
+      <div class="row">
+        <div class="row-avatar ` + cls + `">` + ini + `</div>
+        <div class="row-body"><div class="row-title"><b>@` + req.RequesterID + `</b> requested</div><div class="row-sub">` + statusLabel + `</div></div>
+        <div class="row-right"><div class="row-amt req mono">$` + fmt.Sprintf("%.2f", req.Amount) + `</div><div class="row-time">` + date + `</div></div>
+      </div>`
+	}
+	if paymentsRows == "" {
+		paymentsRows = `<div style="text-align:center; padding:28px 16px; color:var(--text-mute); font-size:13px;">No incoming payment requests.</div>`
+	}
+
+	// --- Active pane: non-overdue, unpaid installments ---
+	activeRows := ""
+	activeIdx := 0
+	for _, inst := range installments {
+		if inst.IsPaid || overdueIDs[inst.ID] {
+			continue
+		}
+		cls := avatarClass(activeIdx)
+		activeRows += `
+      <div class="row">
+        <div class="row-avatar ` + cls + `">BN</div>
+        <div class="row-body">
+          <div class="row-title"><b>BNPL installment</b> <span class="pill">Pay-in-4</span></div>
+          <div class="row-sub">Due ` + inst.DueDate + `</div>
+          <div class="progress"><span style="width:50%;"></span></div>
+        </div>
+        <div class="row-right"><div class="row-amt bnpl mono">$` + fmt.Sprintf("%.2f", inst.Amount) + `</div><div class="row-time">/installment</div></div>
+      </div>`
+		activeIdx++
+	}
+	if activeRows == "" {
+		activeRows = `
+      <div style="text-align:center; padding:28px 16px; color:var(--text-mute); font-size:13px;">No active BNPL plans.</div>`
+	}
+
+	// --- Overdue pane ---
+	overdueSubtabBadge := ""
+	if len(overdueInstallments) > 0 {
+		overdueSubtabBadge = ` <span class="badge mono">` + fmt.Sprintf("%d", len(overdueInstallments)) + `</span>`
+	}
+
+	overdueContent := ""
+	if len(overdueInstallments) == 0 {
+		overdueContent = `
+    <div class="empty">
+      <div class="empty-icon success">
+        <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+      </div>
+      <div class="empty-title">You're all caught up</div>
+      <div class="empty-sub">No overdue bills. Your Splitit Score is safe.</div>
+    </div>`
+	} else {
+		var overdueTotal float64
+		for _, inst := range overdueInstallments {
+			overdueTotal += inst.Amount
+		}
+		overdueRows := ""
+		for i, inst := range overdueInstallments {
+			_ = i
+			overdueRows += `
+        <div class="row overdue-row" data-installment-id="` + inst.ID + `" data-payment-id="` + inst.PaymentID + `" data-amount="` + fmt.Sprintf("%.2f", inst.Amount) + `">
+          <div class="row-avatar av-rose">OD</div>
+          <div class="row-body">
+            <div class="row-title"><b>BNPL installment</b> <span class="pill warn">Overdue</span></div>
+            <div class="row-sub">Due ` + inst.DueDate + `</div>
+            <div class="progress warn"><span style="width:25%;"></span></div>
+          </div>
+          <div class="row-right">
+            <button onclick="payInstallment('` + inst.ID + `','` + inst.PaymentID + `',` + fmt.Sprintf("%.2f", inst.Amount) + `)"
+              style="background:var(--rose);color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">
+              Pay $` + fmt.Sprintf("%.2f", inst.Amount) + `
+            </button>
+          </div>
+        </div>`
+		}
+		overdueContent = `
+    <div class="overdue-banner">
+      <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      <div class="ob-text">
+        <strong>$` + fmt.Sprintf("%.2f", overdueTotal) + ` overdue across ` + fmt.Sprintf("%d", len(overdueInstallments)) + ` bills</strong>
+        <div>Late fees may apply. Pay now to keep your Splitit Score intact.</div>
+      </div>
+      <button onclick="payAllOverdue()">Pay all</button>
+    </div>
+    <div class="card">` + overdueRows + `</div>`
+	}
+
+	return `
+<section class="view" data-view="activity">
+  <div class="section-row" style="margin-top:0;">
+    <h2 style="font-size:22px; font-weight:800; letter-spacing:-0.02em;">Activity</h2>
+  </div>
+
+  <div class="subtabs" role="tablist">
+    <button class="subtab active" data-pane="all" onclick="goPane(this)">Payments</button>
+    <button class="subtab" data-pane="active" onclick="goPane(this)">Active</button>
+    <button class="subtab" data-pane="overdue" onclick="goPane(this)">Overdue` + overdueSubtabBadge + `</button>
+  </div>
+
+  <div data-pane-content="all" class="pane-content">
+    <div class="card">` + paymentsRows + `</div>
+  </div>
+
+  <div data-pane-content="active" class="pane-content" style="display:none;">
+    <div class="card">` + activeRows + `</div>
+  </div>
+
+  <div data-pane-content="overdue" class="pane-content" style="display:none;">
+    ` + overdueContent + `
+  </div>
+</section>
+`
+}
+
+// ---------------------------------------------------------------------------
+// FRIENDS / SOCIAL VIEW
+// ---------------------------------------------------------------------------
+
+func viewFriends(friends []*models.Profile) string {
+	friendCount := len(friends)
+
+	listContent := ""
+	if friendCount > 0 {
+		listContent = `<div class="card" id="friend-list">` + friendsRows(friends) + `</div>`
+	} else {
+		listContent = `<div class="card" id="friend-list" style="display:none;"></div>`
+	}
+
+	emptyStyle := `style="display:none;"`
+	if friendCount == 0 {
+		emptyStyle = ""
+	}
+
+	return `
+<section class="view" data-view="social">
+  <div class="friends-header">
+    <div class="friends-count">` + fmt.Sprintf("%d", friendCount) + ` <small>friends</small></div>
+    <button class="friend-add" onclick="openSheet('addfriend')">
+      <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+      Add friend
+    </button>
+  </div>
+
+  <div class="search-wrap">
+    <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+    <input class="search-inp" type="search" placeholder="Search friends" oninput="filterFriends(this.value)" />
+  </div>
+
+  ` + listContent + `
+
+  <div class="empty" id="friends-empty" ` + emptyStyle + `>
+    <div class="empty-icon">
+      <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
+    </div>
+    <div class="empty-title">No friends yet</div>
+    <div class="empty-sub">Add friends to split bills, send payments, and request money in seconds.</div>
+    <button onclick="openSheet('addfriend')">Add your first friend</button>
+  </div>
+</section>
+`
+}
+
+func friendsRows(friends []*models.Profile) string {
+	out := ""
+	for i, f := range friends {
+		cls := avatarClass(i)
+		dname := profileDisplayName(f)
+		ini := initials(dname)
+		if ini == "?" {
+			r := []rune(f.ID)
+			if len(r) >= 2 {
+				ini = strings.ToUpper(string(r[0])) + strings.ToUpper(string(r[1]))
+			} else if len(r) == 1 {
+				ini = strings.ToUpper(string(r[0]))
+			}
+		}
+		searchKey := strings.ToLower(dname + " @" + f.ID)
+		out += `
+    <div class="friend-row" data-name="` + searchKey + `" data-friend-id="` + f.ID + `">
+      <div class="row-avatar ` + cls + `">` + ini + `</div>
+      <div class="row-body" style="flex:1; min-width:0;">
+        <b>` + dname + `</b>
+        <div>@` + f.ID + `</div>
+      </div>
+      <div class="friend-actions">
+        <button title="Pay" onclick="openPayToFriend('` + f.ID + `')">
+          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+        </button>
+        <button class="remove" title="Remove" onclick="removeFriend(this,'` + f.ID + `','` + dname + `')">
+          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/></svg>
+        </button>
+      </div>
+    </div>`
+	}
+	return out
+}
+
+// ---------------------------------------------------------------------------
+// PROFILE VIEW
+// ---------------------------------------------------------------------------
+
+func viewProfile(user *models.User, avatar, name, handle, email, phone string, friends []*models.Profile, installments []*models.Installment) string {
+	score := user.CreditScore
+	scoreLabel := creditScoreLabel(score)
+	scoreWidth := fmt.Sprintf("%d%%", score)
+
+	var outstandingBNPL float64
+	activeSplits := make(map[string]struct{})
+	for _, inst := range installments {
+		if !inst.IsPaid {
+			outstandingBNPL += inst.Amount
+			activeSplits[inst.PaymentID] = struct{}{}
+		}
+	}
+	availableCredit := user.CreditLimit - outstandingBNPL
+	if availableCredit < 0 {
+		availableCredit = 0
+	}
+
+	balanceWhole := int(user.Balance)
+
+	return `
+<section class="view" data-view="profile">
+  <div class="profile-hero">
+    <div class="avatar-xl">` + avatar + `</div>
+    <div class="profile-name">` + name + `</div>
+    <div class="profile-handle">@` + handle + `</div>
+    <div class="profile-email">` + email + `</div>
+    <div class="profile-phone_number">` + phone + `</div>
+  </div>
+
+  <div class="score-card">
+    <div class="score-header">
+      <div class="score-title">Splitit Score</div>
+      <div class="score-pill">` + scoreLabel + `</div>
+    </div>
+    <div class="score-val mono">` + fmt.Sprintf("%d", score) + `<small>/100</small></div>
+    <div class="score-track"><span style="width:` + scoreWidth + `;"></span></div>
+    <div class="score-track-labels"><span>Poor</span><span>Fair</span><span>Good</span><span>Excellent</span></div>
+    <div style="display:flex; justify-content:space-between; margin-top:14px; padding-top:14px; border-top:1px solid rgba(255,255,255,0.06);">
+      <div>
+        <div style="font-size:11px; color:var(--text-mute); text-transform:uppercase; letter-spacing:0.05em; font-weight:600;">BNPL limit</div>
+        <div class="mono" style="font-size:18px; font-weight:700; color:var(--emerald-hi); margin-top:4px;">$` + fmt.Sprintf("%.2f", user.CreditLimit) + `</div>
+      </div>
+      <div style="text-align:right;">
+        <div style="font-size:11px; color:var(--text-mute); text-transform:uppercase; letter-spacing:0.05em; font-weight:600;">Available</div>
+        <div class="mono" style="font-size:18px; font-weight:700; color:var(--text); margin-top:4px;">$` + fmt.Sprintf("%.2f", availableCredit) + `</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="stat-grid">
+    <div class="stat-tile"><div class="stat-lbl">Balance</div><div class="stat-val green mono">$` + fmt.Sprintf("%d", balanceWhole) + `</div></div>
+    <div class="stat-tile"><div class="stat-lbl">Friends</div><div class="stat-val mono">` + fmt.Sprintf("%d", len(friends)) + `</div></div>
+    <div class="stat-tile"><div class="stat-lbl">Splits</div><div class="stat-val indigo mono">` + fmt.Sprintf("%d", len(activeSplits)) + `</div></div>
+  </div>
+
+  <div class="menu-list">
+    <button class="menu-item mobile-only" onclick="goView('analytics')">
+      <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 0 1 3 19.875v-6.75Z" /><path stroke-linecap="round" stroke-linejoin="round" d="M9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V8.625Z" /><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V4.125Z" /></svg>
+      Analytics
+      <svg class="chev" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
+    </button>
+    <button class="menu-item mobile-only" onclick="goView('wallet')">
+      <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M21 12a2.25 2.25 0 0 0-2.25-2.25H15a3 3 0 1 1-6 0H5.25A2.25 2.25 0 0 0 3 12m18 0v6A2.25 2.25 0 0 1 18.75 20H5.25A2.25 2.25 0 0 1 3 18v-6m18 0V9A2.25 2.25 0 0 0 18.75 6.75H5.25A2.25 2.25 0 0 0 3 9v3M16.5 10.5a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5Z" /></svg>
+      Wallet
+      <svg class="chev" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
+    </button>
+    <button class="menu-item mobile-only" onclick="goView('settings')">
+      <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      Settings
+      <svg class="chev" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
+    </button>
+    <button class="menu-item danger mobile-only" onclick="signOut()">
+      <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+      Sign out
+    </button>
+  </div>
+</section>
+`
+}
+
+// ---------------------------------------------------------------------------
+// PAY SHEET  (dynamic friend dropdowns + real credit display)
+// ---------------------------------------------------------------------------
+
+func paySheetHTML(friends []*models.Profile, availableCredit float64) string {
+	friendOpts := `<option value="">Select a friend…</option>`
+	for _, f := range friends {
+		dname := profileDisplayName(f)
+		friendOpts += `<option value="` + f.ID + `">` + dname + ` · @` + f.ID + `</option>`
+	}
+
+	return `
+<div class="sheet-backdrop" id="pay-sheet" onclick="if(event.target===this) closeSheet('pay')">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title">New payment</div>
+    <div class="sheet-tabs" role="tablist">
+      <button class="sheet-tab active" data-paytab="send" onclick="payTab(this)">Send to friend</button>
+      <button class="sheet-tab" data-paytab="bnpl" onclick="payTab(this)">Buy now, pay later</button>
+    </div>
+
+    <div class="sheet-pane active" data-pay-pane="send">
+      <div class="amount-big mono"><span class="dollar">$</span><span id="send-amt">0.00</span></div>
+      <div class="chip-row" style="justify-content:center;">
+        <button type="button" class="chip" onclick="setSendAmt(10)">$10</button>
+        <button type="button" class="chip" onclick="setSendAmt(25)">$25</button>
+        <button type="button" class="chip" onclick="setSendAmt(50)">$50</button>
+        <button type="button" class="chip" onclick="setSendAmt(100)">$100</button>
+      </div>
+      <div>
+        <label class="modal-lbl">To</label>
+        <select class="modal-sel" id="pay-receiver-sel">` + friendOpts + `</select>
+      </div>
+      <div>
+        <label class="modal-lbl">Amount</label>
+        <input class="modal-inp" id="pay-amount-inp" type="number" inputmode="decimal" placeholder="0.00"
+               oninput="document.getElementById('send-amt').textContent=parseFloat(this.value||0).toFixed(2)" />
+      </div>
+      <div>
+        <label class="modal-lbl">Note</label>
+        <input class="modal-inp" id="pay-note-inp" type="text" placeholder="Dinner, rent, etc." />
+      </div>
+      <button class="submit-btn" onclick="submitSendPayment()">Send payment</button>
+    </div>
+
+    <div class="sheet-pane" data-pay-pane="bnpl">
+      <div class="info-card">
+        <span class="label">Available credit</span>
+        <span class="val mono">$` + fmt.Sprintf("%.2f", availableCredit) + `</span>
+      </div>
+      <div>
+        <label class="modal-lbl">Recipient</label>
+        <select class="modal-sel" id="bnpl-receiver-sel">` + friendOpts + `</select>
+      </div>
+      <div>
+        <label class="modal-lbl">Purchase amount</label>
+        <input class="modal-inp" id="bnpl-amount-inp" type="number" inputmode="decimal" placeholder="0.00" />
+      </div>
+      <div>
+        <label class="modal-lbl">Plan</label>
+        <select class="modal-sel" id="bnpl-plan-sel">
+          <option value="4">Pay-in-4 (0% APR · 4 payments over 6 weeks)</option>
+          <option value="6">Pay-in-6 (12.99% APR · 6 monthly payments)</option>
+          <option value="12">Pay-in-12 (15.99% APR · 12 monthly payments)</option>
+        </select>
+      </div>
+      <div>
+        <label class="modal-lbl">Note</label>
+        <input class="modal-inp" id="bnpl-note-inp" type="text" placeholder="Item or purchase description" />
+      </div>
+      <button class="submit-btn emerald" onclick="submitBNPL()">Approve plan</button>
+    </div>
+  </div>
 </div>`
 }
 
-// dashboardStyles bundles all CSS for the dashboard into a single <style> block.
+// ---------------------------------------------------------------------------
+// REQUEST SHEET  (dynamic friend dropdowns)
+// ---------------------------------------------------------------------------
+
+func requestSheetHTML(friends []*models.Profile) string {
+	friendOpts := `<option value="">Select a friend…</option>`
+	for _, f := range friends {
+		dname := profileDisplayName(f)
+		friendOpts += `<option value="` + f.ID + `">` + dname + ` · @` + f.ID + `</option>`
+	}
+
+	return `
+<div class="sheet-backdrop" id="request-sheet" onclick="if(event.target===this) closeSheet('request')">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title">Request money</div>
+    <div class="sheet-pane active" style="display:flex;">
+      <div class="amount-big mono"><span class="dollar">$</span><span id="req-amt">0.00</span></div>
+      <div class="chip-row" style="justify-content:center;">
+        <button type="button" class="chip" onclick="setReqAmt(10)">$10</button>
+        <button type="button" class="chip" onclick="setReqAmt(25)">$25</button>
+        <button type="button" class="chip" onclick="setReqAmt(50)">$50</button>
+        <button type="button" class="chip" onclick="setReqAmt(100)">$100</button>
+      </div>
+      <div>
+        <label class="modal-lbl">Request from</label>
+        <select class="modal-sel" id="req-payer-sel">` + friendOpts + `</select>
+      </div>
+      <div>
+        <label class="modal-lbl">Amount</label>
+        <input class="modal-inp" id="req-amount-inp" type="number" inputmode="decimal" placeholder="0.00"
+               oninput="document.getElementById('req-amt').textContent=parseFloat(this.value||0).toFixed(2)" />
+      </div>
+      <div>
+        <label class="modal-lbl">Note</label>
+        <input class="modal-inp" id="req-note-inp" type="text" placeholder="What's it for?" />
+      </div>
+      <button class="submit-btn amber" onclick="submitRequest()">Send request</button>
+    </div>
+  </div>
+</div>`
+}
+
+// ---------------------------------------------------------------------------
+// ADD FRIEND SHEET  (new)
+// ---------------------------------------------------------------------------
+
+func addFriendSheetHTML() string {
+	return `
+<div class="sheet-backdrop" id="addfriend-sheet" onclick="if(event.target===this) closeSheet('addfriend')">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title">Add friend</div>
+    <div class="sheet-pane active" style="display:flex;">
+      <div>
+        <label class="modal-lbl">Their user ID</label>
+        <input class="modal-inp" id="addfriend-id-inp" type="text" placeholder="their_handle" autocomplete="off" />
+      </div>
+      <button class="submit-btn" onclick="submitAddFriend()">Send friend request</button>
+    </div>
+  </div>
+</div>`
+}
+
+// ---------------------------------------------------------------------------
+// DASHBOARD STYLES  (unchanged — kept here for reference)
+// ---------------------------------------------------------------------------
 func dashboardStyles() string {
 	return `
 <style>
@@ -365,7 +1035,6 @@ func dashboardStyles() string {
     --rose-hi: #f87171;
   }
 
-  /* Responsive layout helpers for structural toggling */
   .desktop-only { display: flex !important; }
   .mobile-only { display: none !important; }
 
@@ -374,7 +1043,6 @@ func dashboardStyles() string {
     .mobile-only { display: flex !important; }
   }
 
-  /* Reset on the master canvas */
   #main-application-viewport { max-width: 100% !important; padding: 0 !important; }
   body { background: var(--bg) !important; padding: 0 !important; display: block !important; min-height: 100vh; align-items: initial !important; justify-content: initial !important; }
 
@@ -388,7 +1056,6 @@ func dashboardStyles() string {
   }
   .mono { font-family: 'JetBrains Mono', monospace; font-feature-settings: 'tnum' 1; }
 
-  /* --------- TOPBAR --------- */
   .topbar {
     position: sticky; top: 0; z-index: 40;
     background: rgba(2, 6, 23, 0.85);
@@ -427,7 +1094,6 @@ func dashboardStyles() string {
   }
   .avatar-btn:hover { transform: scale(1.06); }
 
-  /* --------- BODY GRID (sidebar + content) --------- */
   .app-body {
     max-width: 1280px; margin: 0 auto;
     display: grid; grid-template-columns: 1fr;
@@ -435,7 +1101,6 @@ func dashboardStyles() string {
   }
   .sidebar { display: none; }
 
-  /* --------- CONTENT --------- */
   .content {
     padding: 18px 16px 96px;
     width: 100%;
@@ -447,7 +1112,6 @@ func dashboardStyles() string {
   .view.active { display: block; }
   @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 
-  /* --------- BALANCE HERO --------- */
   .hero {
     position: relative;
     background: linear-gradient(135deg, #1e1b4b 0%, #0f172a 60%, #0b1220 100%);
@@ -467,7 +1131,6 @@ func dashboardStyles() string {
   .hero-meta { position: relative; display: flex; gap: 18px; margin-top: 16px; font-size: 13px; color: var(--text-dim); }
   .hero-meta b { color: var(--text); font-weight: 600; }
 
-  /* --------- ACTION ROW (2 buttons: Pay, Request) --------- */
   .actions {
     display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
     margin: 18px 0;
@@ -497,7 +1160,6 @@ func dashboardStyles() string {
   .action .lbl-stack b { font-size: 15px; font-weight: 700; }
   .action .lbl-stack small { font-size: 12px; color: var(--text-mute); font-weight: 500; margin-top: 2px; }
 
-  /* --------- QUICK STATS STRIP --------- */
   .quick-strip {
     display: grid; grid-template-columns: 1fr 1fr;
     gap: 10px; margin-bottom: 18px;
@@ -516,7 +1178,6 @@ func dashboardStyles() string {
   .qstat.warn .qstat-val { color: var(--rose-hi); }
   .qstat.warn .qstat-label { color: #fca5a5; }
 
-  /* --------- SECTION LABEL --------- */
   .section-row {
     display: flex; align-items: center; justify-content: space-between;
     margin: 22px 0 10px;
@@ -528,7 +1189,6 @@ func dashboardStyles() string {
   }
   .section-row a:hover, .section-row button.linklike:hover { color: var(--indigo); }
 
-  /* --------- CARD + LIST --------- */
   .card { background: var(--surface-2); border: 1px solid var(--border); border-radius: 16px; overflow: hidden; }
 
   .row { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--border-soft); transition: background .15s; }
@@ -560,7 +1220,6 @@ func dashboardStyles() string {
   .av-cyan { background: #042f2e; color: #5eead4; }
   .av-pink { background: #4a044e; color: #f0abfc; }
 
-  /* --------- ACTIVITY VIEW (sub-tabs) --------- */
   .subtabs {
     display: flex; gap: 4px;
     background: var(--surface-2); border: 1px solid var(--border);
@@ -586,7 +1245,6 @@ func dashboardStyles() string {
     font-family: 'JetBrains Mono', monospace;
   }
 
-  /* --------- OVERDUE TREATMENT --------- */
   .overdue-row { background: rgba(239, 68, 68, 0.06); }
   .overdue-row:hover { background: rgba(239, 68, 68, 0.12); }
   .overdue-row .row-title b { color: var(--rose-hi); }
@@ -628,7 +1286,6 @@ func dashboardStyles() string {
   .progress > span { display: block; height: 100%; background: var(--indigo); border-radius: 2px; }
   .progress.warn > span { background: var(--rose); }
 
-  /* --------- FRIENDS VIEW --------- */
   .friends-header {
     display: flex; align-items: center; justify-content: space-between;
     margin-bottom: 14px;
@@ -673,7 +1330,6 @@ func dashboardStyles() string {
   .friend-actions button:hover { background: var(--surface-2); color: var(--text); border-color: var(--indigo); }
   .friend-actions button.remove:hover { color: var(--rose-hi); border-color: var(--rose); }
 
-  /* --------- PROFILE VIEW --------- */
   .profile-hero {
     background: var(--surface-2);
     border: 1px solid var(--border);
@@ -741,7 +1397,6 @@ func dashboardStyles() string {
   .menu-item.danger svg { color: var(--rose-hi); }
   .menu-item .chev { margin-left: auto; color: var(--text-faint); }
 
-  /* --------- EMPTY STATES --------- */
   .empty {
     text-align: center;
     padding: 36px 20px;
@@ -766,7 +1421,6 @@ func dashboardStyles() string {
   }
   .empty button:hover { background: #4f46e5; }
 
-  /* --------- BOTTOM TAB BAR --------- */
   .tabbar {
     position: fixed; bottom: 0; left: 0; right: 0; z-index: 30;
     background: rgba(2, 6, 23, 0.92);
@@ -788,7 +1442,6 @@ func dashboardStyles() string {
   .tab.active { color: var(--indigo-hi); }
   .tab:active { background: var(--surface-2); }
 
-  /* --------- SHEETS --------- */
   .sheet-backdrop {
     display: none;
     position: fixed; inset: 0; z-index: 60;
@@ -879,7 +1532,6 @@ func dashboardStyles() string {
   .info-card .label { color: var(--text-mute); font-weight: 600; }
   .info-card .val { color: var(--emerald-hi); font-weight: 700; font-family: 'JetBrains Mono', monospace; }
 
-  /* --------- TOAST --------- */
   #toast {
     display: none;
     position: fixed; top: 72px; left: 50%; transform: translateX(-50%);
@@ -892,9 +1544,6 @@ func dashboardStyles() string {
   #toast.show { display: block; animation: fadeUp .2s both; }
   #toast.warn { background: var(--rose-soft); border-color: #7f1d1d; color: var(--rose-hi); }
 
-  /* ===================================================================
-     RESPONSIVE BREAKPOINTS
-     =================================================================== */
   @media (min-width: 640px) {
     .content { padding: 28px 24px 96px; max-width: 760px; }
     .actions { gap: 14px; }
@@ -944,522 +1593,7 @@ func dashboardStyles() string {
 }
 
 // ---------------------------------------------------------------------------
-// HOME VIEW
-// ---------------------------------------------------------------------------
-func viewHome(name string) string {
-	firstName := strings.Fields(name)
-	greet := "there"
-	if len(firstName) > 0 {
-		greet = firstName[0]
-	}
-	return `
-<section class="view active" data-view="home">
-  <div class="greeting" style="font-size:14px; color:var(--text-mute); margin-bottom:14px;">Welcome back, <b style="color:var(--text);">` + greet + `</b></div>
-
-  <div class="hero">
-    <div class="hero-label">Available balance</div>
-    <div class="hero-amount mono">$1,247<span class="cents">.30</span></div>
-    <div class="hero-meta">
-      <span><b>$696.00</b> outstanding</span>
-      <span style="opacity:.4;">·</span>
-      <span><b>3</b> active splits</span>
-    </div>
-  </div>
-
-  <div class="actions">
-    <button class="action req" onclick="openSheet('request')">
-      <span class="ico"><svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 5v14"/><path d="M5 12h14"/></svg></span>
-      <span class="lbl-stack"><b>Request</b><small>Ask a friend</small></span>
-    </button>
-	<button class="action pay" onclick="openSheet('pay')">
-      <span class="ico"><svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></span>
-      <span class="lbl-stack"><b>Pay</b><small>Send · BNPL</small></span>
-    </button>
-  </div>
-
-  <div class="quick-strip">
-    <button class="qstat warn" onclick="goView('activity', 'overdue')">
-      <div>
-        <div class="qstat-label">Overdue</div>
-        <div class="qstat-val mono">2 bills</div>
-      </div>
-      <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
-    </button>
-    <button class="qstat" onclick="goView('activity', 'active')">
-      <div>
-        <div class="qstat-label">Due this week</div>
-        <div class="qstat-val mono">$127.25</div>
-      </div>
-      <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
-    </button>
-  </div>
-
-  <div class="section-row">
-    <h2>Recent activity</h2>
-    <button class="linklike" onclick="goView('activity')">See all</button>
-  </div>
-  <div class="card">
-    <div class="row">
-      <div class="row-avatar av-indigo">MH</div>
-      <div class="row-body">
-        <div class="row-title"><b>Marcus</b> paid <b>you</b></div>
-        <div class="row-sub">Brewery tab</div>
-      </div>
-      <div class="row-right"><div class="row-amt pos mono">+$42.50</div><div class="row-time">18m ago</div></div>
-    </div>
-    <div class="row">
-      <div class="row-avatar av-amber">PR</div>
-      <div class="row-body">
-        <div class="row-title"><b>Priya</b> requested from <b>you</b></div>
-        <div class="row-sub">Lyft to airport</div>
-      </div>
-      <div class="row-right"><div class="row-amt req mono">$28.75</div><div class="row-time">2h ago</div></div>
-    </div>
-    <div class="row">
-      <div class="row-avatar av-emerald">SP</div>
-      <div class="row-body">
-        <div class="row-title"><b>You</b> paid <b>Sweetgreen</b></div>
-        <div class="row-sub">Lunch order</div>
-      </div>
-      <div class="row-right"><div class="row-amt neg mono">$18.40</div><div class="row-time">Yesterday</div></div>
-    </div>
-    <div class="row">
-      <div class="row-avatar av-violet">EK</div>
-      <div class="row-body">
-        <div class="row-title"><b>Elena</b> paid <b>you</b></div>
-        <div class="row-sub">Coffee + bagels</div>
-      </div>
-      <div class="row-right"><div class="row-amt pos mono">+$19.25</div><div class="row-time">Yesterday</div></div>
-    </div>
-    <div class="row">
-      <div class="row-avatar av-cyan">BS</div>
-      <div class="row-body">
-        <div class="row-title"><b>BNPL</b> · Bose QC Ultra <span class="pill">Pay-in-4</span></div>
-        <div class="row-sub">Installment 2 of 4 charged</div>
-      </div>
-      <div class="row-right"><div class="row-amt bnpl mono">$94.75</div><div class="row-time">3d ago</div></div>
-    </div>
-  </div>
-</section>
-`
-}
-
-// ---------------------------------------------------------------------------
-// ACTIVITY VIEW
-// ---------------------------------------------------------------------------
-func viewActivity() string {
-	return `
-<section class="view" data-view="activity">
-  <div class="section-row" style="margin-top:0;">
-    <h2 style="font-size:22px; font-weight:800; letter-spacing:-0.02em;">Activity</h2>
-  </div>
-
-  <div class="subtabs" role="tablist">
-    <button class="subtab active" data-pane="all" onclick="goPane(this)">Payments</button>
-    <button class="subtab" data-pane="active" onclick="goPane(this)">Active</button>
-    <button class="subtab" data-pane="overdue" onclick="goPane(this)">Overdue <span class="badge mono">2</span></button>
-  </div>
-
-  <div data-pane-content="all" class="pane-content">
-    <div class="card">
-      <div class="row">
-        <div class="row-avatar av-indigo">MH</div>
-        <div class="row-body"><div class="row-title"><b>Marcus Holloway</b> paid you</div><div class="row-sub">Brewery tab</div></div>
-        <div class="row-right"><div class="row-amt pos mono">+$42.50</div><div class="row-time">18m ago</div></div>
-      </div>
-      <div class="row">
-        <div class="row-avatar av-amber">PR</div>
-        <div class="row-body"><div class="row-title"><b>Priya Raman</b> requested</div><div class="row-sub">Lyft to airport · Pending</div></div>
-        <div class="row-right"><div class="row-amt req mono">$28.75</div><div class="row-time">2h ago</div></div>
-      </div>
-      <div class="row">
-        <div class="row-avatar av-emerald">SG</div>
-        <div class="row-body"><div class="row-title">You paid <b>Sweetgreen</b></div><div class="row-sub">Lunch order</div></div>
-        <div class="row-right"><div class="row-amt neg mono">$18.40</div><div class="row-time">Yesterday</div></div>
-      </div>
-      <div class="row">
-        <div class="row-avatar av-violet">EK</div>
-        <div class="row-body"><div class="row-title"><b>Elena Kowalski</b> paid you</div><div class="row-sub">Coffee + bagels</div></div>
-        <div class="row-right"><div class="row-amt pos mono">+$19.25</div><div class="row-time">Yesterday</div></div>
-      </div>
-      <div class="row">
-        <div class="row-avatar av-cyan">DF</div>
-        <div class="row-body"><div class="row-title">You paid <b>Diego Fernández</b></div><div class="row-sub">Concert tickets · split 3 ways</div></div>
-        <div class="row-right"><div class="row-amt neg mono">$156.00</div><div class="row-time">2d ago</div></div>
-      </div>
-      <div class="row">
-        <div class="row-avatar av-emerald">BO</div>
-        <div class="row-body"><div class="row-title"><b>BNPL</b> · Bose QC Ultra</div><div class="row-sub">Installment charged</div></div>
-        <div class="row-right"><div class="row-amt bnpl mono">$94.75</div><div class="row-time">3d ago</div></div>
-      </div>
-      <div class="row">
-        <div class="row-avatar av-pink">AM</div>
-        <div class="row-body"><div class="row-title"><b>Aisha Mansour</b> paid you</div><div class="row-sub">Birthday gift split</div></div>
-        <div class="row-right"><div class="row-amt pos mono">+$67.30</div><div class="row-time">4d ago</div></div>
-      </div>
-      <div class="row">
-        <div class="row-avatar av-amber">RS</div>
-        <div class="row-body"><div class="row-title">You paid <b>Reuben Sterling</b></div><div class="row-sub">Festival pass</div></div>
-        <div class="row-right"><div class="row-amt neg mono">$215.00</div><div class="row-time">1w ago</div></div>
-      </div>
-      <div class="row">
-        <div class="row-avatar av-violet">HC</div>
-        <div class="row-body"><div class="row-title"><b>Hannah Choi</b> paid you</div><div class="row-sub">Groceries split</div></div>
-        <div class="row-right"><div class="row-amt pos mono">+$38.15</div><div class="row-time">1w ago</div></div>
-      </div>
-      <div class="row">
-        <div class="row-avatar av-cyan">IK</div>
-        <div class="row-body"><div class="row-title"><b>BNPL</b> · IKEA furniture</div><div class="row-sub">Installment 3 of 4 charged</div></div>
-        <div class="row-right"><div class="row-amt bnpl mono">$187.25</div><div class="row-time">2w ago</div></div>
-      </div>
-    </div>
-  </div>
-
-  <div data-pane-content="active" class="pane-content" style="display:none;">
-    <div class="card">
-      <div class="row">
-        <div class="row-avatar av-cyan">BO</div>
-        <div class="row-body">
-          <div class="row-title"><b>Bose QC Ultra headphones</b> <span class="pill">Pay-in-4</span></div>
-          <div class="row-sub">Next due Jun 14 · 2 of 4 paid</div>
-          <div class="progress"><span style="width:50%;"></span></div>
-        </div>
-        <div class="row-right"><div class="row-amt bnpl mono">$94.75</div><div class="row-time">/installment</div></div>
-      </div>
-      <div class="row">
-        <div class="row-avatar av-emerald">AL</div>
-        <div class="row-body">
-          <div class="row-title"><b>Allbirds Wool Runners</b> <span class="pill">Pay-in-4</span></div>
-          <div class="row-sub">Next due Jun 22 · 1 of 4 paid</div>
-          <div class="progress"><span style="width:25%;"></span></div>
-        </div>
-        <div class="row-right"><div class="row-amt bnpl mono">$32.50</div><div class="row-time">/installment</div></div>
-      </div>
-      <div class="row">
-        <div class="row-avatar av-amber">IK</div>
-        <div class="row-body">
-          <div class="row-title"><b>IKEA furniture set</b> <span class="pill">Pay-in-4</span></div>
-          <div class="row-sub">Next due Jul 5 · 3 of 4 paid</div>
-          <div class="progress"><span style="width:75%;"></span></div>
-        </div>
-        <div class="row-right"><div class="row-amt bnpl mono">$187.25</div><div class="row-time">/installment</div></div>
-      </div>
-    </div>
-  </div>
-
-  <div data-pane-content="overdue" class="pane-content" style="display:none;">
-    <div class="overdue-banner">
-      <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-      <div class="ob-text">
-        <strong>$39.94 overdue across 2 bills</strong>
-        <div>Late fees may apply. Pay now to keep your Splitit Score intact.</div>
-      </div>
-      <button onclick="showToast('Opening pay-all flow…')">Pay all</button>
-    </div>
-
-    <div class="card">
-      <div class="row overdue-row">
-        <div class="row-avatar av-rose">SD</div>
-        <div class="row-body">
-          <div class="row-title"><b>Steam Deck cover</b> <span class="pill warn">3 days late</span></div>
-          <div class="row-sub">Due May 28 · Installment 2 of 4</div>
-          <div class="progress warn"><span style="width:25%;"></span></div>
-        </div>
-        <div class="row-right"><div class="row-amt mono" style="color:var(--rose-hi);">$24.99</div><div class="row-time">+ $5 late fee</div></div>
-      </div>
-      <div class="row overdue-row">
-        <div class="row-avatar av-rose">AU</div>
-        <div class="row-body">
-          <div class="row-title"><b>Audible subscription</b> <span class="pill warn">1 day late</span></div>
-          <div class="row-sub">Due May 30 · Installment 1 of 1</div>
-          <div class="progress warn"><span style="width:0%;"></span></div>
-        </div>
-        <div class="row-right"><div class="row-amt mono" style="color:var(--rose-hi);">$14.95</div><div class="row-time">no grace fee</div></div>
-      </div>
-    </div>
-
-    <div class="empty" style="display:none;" data-empty="overdue">
-      <div class="empty-icon success">
-        <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
-      </div>
-      <div class="empty-title">You're all caught up</div>
-      <div class="empty-sub">No overdue bills. Your Splitit Score is safe.</div>
-    </div>
-  </div>
-</section>
-`
-}
-
-// ---------------------------------------------------------------------------
-// FRIENDS VIEW
-// ---------------------------------------------------------------------------
-func viewFriends() string {
-	return `
-<section class="view" data-view="friends">
-  <div class="friends-header">
-    <div class="friends-count">12 <small>friends</small></div>
-    <button class="friend-add" onclick="showToast('Add friend modal coming soon')">
-      <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
-      Add friend
-    </button>
-  </div>
-
-  <div class="search-wrap">
-    <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-    <input class="search-inp" type="search" placeholder="Search friends" oninput="filterFriends(this.value)" />
-  </div>
-
-  <div class="card" id="friend-list">
-` + friendsRows() + `
-  </div>
-
-  <div class="empty" id="friends-empty" style="display:none;">
-    <div class="empty-icon">
-      <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
-    </div>
-    <div class="empty-title">No friends yet</div>
-    <div class="empty-sub">Add friends to split bills, send payments, and request money in seconds.</div>
-    <button onclick="showToast('Add friend modal coming soon')">Add your first friend</button>
-  </div>
-</section>
-`
-}
-
-func friendsRows() string {
-	type fr struct {
-		Initials string
-		Class    string
-		Name     string
-		Handle   string
-		Last     string
-	}
-	all := []fr{
-		{"MH", "av-indigo", "Marcus Holloway", "@mholloway", "Last paid you · Yesterday"},
-		{"PR", "av-amber", "Priya Raman", "@priya.r", "Last paid you · 3d ago"},
-		{"DF", "av-emerald", "Diego Fernández", "@diego.fz", "You paid · 1w ago"},
-		{"EK", "av-violet", "Elena Kowalski", "@ekowalski", "Last paid you · 1w ago"},
-		{"AM", "av-pink", "Aisha Mansour", "@aisha.m", "Last paid you · 2w ago"},
-		{"TD", "av-cyan", "Tomás Delacroix", "@tdelacroix", "No activity yet"},
-		{"HC", "av-indigo", "Hannah Choi", "@hchoi", "Last paid you · 3w ago"},
-		{"YW", "av-amber", "Yuki Watanabe", "@yuki.w", "You paid · 1mo ago"},
-		{"RS", "av-emerald", "Reuben Sterling", "@rsterling", "You paid · 1mo ago"},
-		{"NB", "av-violet", "Naomi Blackwood", "@nblackwood", "Last paid you · 2mo ago"},
-		{"SM", "av-pink", "Sofia Martinelli", "@smartinelli", "You paid · 3mo ago"},
-		{"KA", "av-cyan", "Kwame Asante", "@kwame.a", "No activity yet"},
-	}
-	out := ""
-	for _, f := range all {
-		out += `
-    <div class="friend-row" data-name="` + strings.ToLower(f.Name+" "+f.Handle) + `">
-      <div class="row-avatar ` + f.Class + `">` + f.Initials + `</div>
-      <div class="row-body" style="flex:1; min-width:0;">
-        <b>` + f.Name + `</b>
-        <div>` + f.Handle + ` · ` + f.Last + `</div>
-      </div>
-      <div class="friend-actions">
-        <button title="Pay" onclick="openSheet('pay'); showToast('Selected ` + f.Name + `');">
-          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-        </button>
-        <button class="remove" title="Remove" onclick="removeFriend(this, '` + f.Name + `')">
-          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/></svg>
-        </button>
-      </div>
-    </div>`
-	}
-	return out
-}
-
-// ---------------------------------------------------------------------------
-// PROFILE VIEW
-// ---------------------------------------------------------------------------
-func viewProfile(_ *models.User, avatar, name, handle, email, phone_number string) string {
-	return `
-<section class="view" data-view="profile">
-  <div class="profile-hero">
-    <div class="avatar-xl">` + avatar + `</div>
-    <div class="profile-name">` + name + `</div>
-    <div class="profile-handle">@` + handle + `</div>
-    <div class="profile-email">` + email + `</div>
-	<div class="profile-phone_number">` + phone_number + `</div>
-  </div>
-
-  <div class="score-card">
-    <div class="score-header">
-      <div class="score-title">Splitit Score</div>
-      <div class="score-pill">Excellent</div>
-    </div>
-    <div class="score-val mono">76<small>/100</small></div>
-    <div class="score-track"><span style="width:76%;"></span></div>
-    <div class="score-track-labels"><span>Poor</span><span>Fair</span><span>Good</span><span>Excellent</span></div>
-    <div style="display:flex; justify-content:space-between; margin-top:14px; padding-top:14px; border-top:1px solid rgba(255,255,255,0.06);">
-      <div>
-        <div style="font-size:11px; color:var(--text-mute); text-transform:uppercase; letter-spacing:0.05em; font-weight:600;">BNPL limit</div>
-        <div class="mono" style="font-size:18px; font-weight:700; color:var(--emerald-hi); margin-top:4px;">$1,500</div>
-      </div>
-      <div style="text-align:right;">
-        <div style="font-size:11px; color:var(--text-mute); text-transform:uppercase; letter-spacing:0.05em; font-weight:600;">Available</div>
-        <div class="mono" style="font-size:18px; font-weight:700; color:var(--text); margin-top:4px;">$804.00</div>
-      </div>
-    </div>
-  </div>
-
-  <div class="stat-grid">
-    <div class="stat-tile"><div class="stat-lbl">Balance</div><div class="stat-val green mono">$1,247</div></div>
-    <div class="stat-tile"><div class="stat-lbl">Friends</div><div class="stat-val mono">12</div></div>
-    <div class="stat-tile"><div class="stat-lbl">Splits</div><div class="stat-val indigo mono">3</div></div>
-  </div>
-
-  <div class="menu-list">
-    <button class="menu-item mobile-only" onclick="goView('analytics')">
-      <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 0 1 3 19.875v-6.75Z" /><path stroke-linecap="round" stroke-linejoin="round" d="M9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V8.625Z" /><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V4.125Z" /></svg>
-      Analytics
-      <svg class="chev" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
-    </button>
-    <button class="menu-item mobile-only" onclick="goView('wallet')">
-      <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M21 12a2.25 2.25 0 0 0-2.25-2.25H15a3 3 0 1 1-6 0H5.25A2.25 2.25 0 0 0 3 12m18 0v6A2.25 2.25 0 0 1 18.75 20H5.25A2.25 2.25 0 0 1 3 18v-6m18 0V9A2.25 2.25 0 0 0 18.75 6.75H5.25A2.25 2.25 0 0 0 3 9v3M16.5 10.5a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5Z" /></svg>
-      Wallet
-      <svg class="chev" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
-    </button>
-    <button class="menu-item mobile-only" onclick="goView('settings')">
-      <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-      Settings
-      <svg class="chev" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
-    </button>
-    <button class="menu-item danger mobile-only" onclick="signOut()">
-      <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-      Sign out
-    </button>
-  </div>
-</section>
-`
-}
-
-// ---------------------------------------------------------------------------
-// PAY SHEET
-// ---------------------------------------------------------------------------
-func paySheetHTML() string {
-	return `
-<div class="sheet-backdrop" id="pay-sheet" onclick="if(event.target===this) closeSheet('pay')">
-  <div class="sheet">
-    <div class="sheet-handle"></div>
-    <div class="sheet-title">New payment</div>
-    <div class="sheet-tabs" role="tablist">
-      <button class="sheet-tab active" data-paytab="send" onclick="payTab(this)">Send to friend</button>
-      <button class="sheet-tab" data-paytab="bnpl" onclick="payTab(this)">Buy now, pay later</button>
-    </div>
-
-    <div class="sheet-pane active" data-pay-pane="send">
-      <div class="amount-big mono"><span class="dollar">$</span><span id="send-amt">0.00</span></div>
-      <div class="chip-row" style="justify-content:center;">
-        <button type="button" class="chip" onclick="setSendAmt(10)">$10</button>
-        <button type="button" class="chip" onclick="setSendAmt(25)">$25</button>
-        <button type="button" class="chip" onclick="setSendAmt(50)">$50</button>
-        <button type="button" class="chip" onclick="setSendAmt(100)">$100</button>
-      </div>
-      <div>
-        <label class="modal-lbl">To</label>
-        <select class="modal-sel">
-          <option value="">Select a friend…</option>
-          <option>Marcus Holloway · @mholloway</option>
-          <option>Priya Raman · @priya.r</option>
-          <option>Diego Fernández · @diego.fz</option>
-          <option>Elena Kowalski · @ekowalski</option>
-          <option>Aisha Mansour · @aisha.m</option>
-        </select>
-      </div>
-      <div>
-        <label class="modal-lbl">Amount</label>
-        <input class="modal-inp" type="number" inputmode="decimal" placeholder="0.00" oninput="document.getElementById('send-amt').textContent = parseFloat(this.value || 0).toFixed(2)" />
-      </div>
-      <div>
-        <label class="modal-lbl">Note</label>
-        <input class="modal-inp" type="text" placeholder="Dinner, rent, etc." />
-      </div>
-      <button class="submit-btn" onclick="submitPayment('Payment sent successfully')">Send payment</button>
-    </div>
-
-    <div class="sheet-pane" data-pay-pane="bnpl">
-      <div class="info-card">
-        <span class="label">Available credit</span>
-        <span class="val mono">$804.00</span>
-      </div>
-      <div>
-        <label class="modal-lbl">Merchant or seller</label>
-        <select class="modal-sel">
-          <option value="">Select merchant…</option>
-          <option>Apple Store</option>
-          <option>Best Buy</option>
-          <option>Wayfair</option>
-          <option>Diego Fernández · @diego.fz</option>
-          <option>Marcus Holloway · @mholloway</option>
-        </select>
-      </div>
-      <div>
-        <label class="modal-lbl">Purchase amount</label>
-        <input class="modal-inp" type="number" inputmode="decimal" placeholder="0.00" />
-      </div>
-      <div>
-        <label class="modal-lbl">Plan</label>
-        <select class="modal-sel">
-          <option>Pay-in-4 (0% APR · 4 payments over 6 weeks)</option>
-          <option>Pay-in-6 (12.99% APR · 6 monthly payments)</option>
-          <option>Pay-in-12 (15.99% APR · 12 monthly payments)</option>
-        </select>
-      </div>
-      <div>
-        <label class="modal-lbl">What are you buying?</label>
-        <input class="modal-inp" type="text" placeholder="Item name" />
-      </div>
-      <button class="submit-btn emerald" onclick="submitPayment('BNPL plan approved')">Approve plan</button>
-    </div>
-  </div>
-</div>`
-}
-
-// ---------------------------------------------------------------------------
-// REQUEST SHEET
-// ---------------------------------------------------------------------------
-func requestSheetHTML() string {
-	return `
-<div class="sheet-backdrop" id="request-sheet" onclick="if(event.target===this) closeSheet('request')">
-  <div class="sheet">
-    <div class="sheet-handle"></div>
-    <div class="sheet-title">Request money</div>
-    <div class="sheet-pane active" style="display:flex;">
-      <div class="amount-big mono"><span class="dollar">$</span><span id="req-amt">0.00</span></div>
-      <div class="chip-row" style="justify-content:center;">
-        <button type="button" class="chip" onclick="setReqAmt(10)">$10</button>
-        <button type="button" class="chip" onclick="setReqAmt(25)">$25</button>
-        <button type="button" class="chip" onclick="setReqAmt(50)">$50</button>
-        <button type="button" class="chip" onclick="setReqAmt(100)">$100</button>
-      </div>
-      <div>
-        <label class="modal-lbl">Request from</label>
-        <select class="modal-sel">
-          <option value="">Select a friend…</option>
-          <option>Marcus Holloway · @mholloway</option>
-          <option>Priya Raman · @priya.r</option>
-          <option>Diego Fernández · @diego.fz</option>
-          <option>Elena Kowalski · @ekowalski</option>
-          <option>Aisha Mansour · @aisha.m</option>
-        </select>
-      </div>
-      <div>
-        <label class="modal-lbl">Amount</label>
-        <input class="modal-inp" type="number" inputmode="decimal" placeholder="0.00" oninput="document.getElementById('req-amt').textContent = parseFloat(this.value || 0).toFixed(2)" />
-      </div>
-      <div>
-        <label class="modal-lbl">Note</label>
-        <input class="modal-inp" type="text" placeholder="What's it for?" />
-      </div>
-      <button class="submit-btn amber" onclick="submitPayment('Request sent')">Send request</button>
-    </div>
-  </div>
-</div>`
-}
-
-// ---------------------------------------------------------------------------
-// CLIENT SCRIPT
+// CLIENT SCRIPT  (all actions are real API calls)
 // ---------------------------------------------------------------------------
 func dashboardScript() string {
 	return `
@@ -1507,15 +1641,17 @@ func dashboardScript() string {
     });
   }
 
-  // --- Amount chip helpers ----------------------------------------------
-  function setSendAmt(v) { document.getElementById('send-amt').textContent = v.toFixed(2); }
-  function setReqAmt(v)  { document.getElementById('req-amt').textContent  = v.toFixed(2); }
+  // --- Amount chip helpers ------------------------------------------------
+  function setSendAmt(v) { document.getElementById('send-amt').textContent = v.toFixed(2); document.getElementById('pay-amount-inp').value = v; }
+  function setReqAmt(v)  { document.getElementById('req-amt').textContent  = v.toFixed(2); document.getElementById('req-amount-inp').value = v; }
 
-  // --- Submit -------------------------------------------------------------
-  function submitPayment(msg) {
-    closeSheet('pay');
-    closeSheet('request');
-    showToast(msg || 'Done');
+  // --- Open pay sheet pre-filled for a specific friend -------------------
+  function openPayToFriend(friendID) {
+    openSheet('pay');
+    requestAnimationFrame(function() {
+      var sel = document.getElementById('pay-receiver-sel');
+      if (sel) sel.value = friendID;
+    });
   }
 
   // --- Toast --------------------------------------------------------------
@@ -1523,14 +1659,143 @@ func dashboardScript() string {
   function showToast(msg, kind) {
     var t = document.getElementById('toast');
     t.textContent = msg;
-    t.classList.remove('warn');
-    if (kind === 'warn') t.classList.add('warn');
-    t.classList.add('show');
+    t.className = kind === 'warn' ? 'show warn' : 'show';
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(function() { t.classList.remove('show'); }, 2400);
+    toastTimer = setTimeout(function() { t.className = ''; }, 2400);
   }
 
-  // --- Friends ------------------------------------------------------------
+  // --- API helper ---------------------------------------------------------
+  function apiPost(url, body, onOk, onErr) {
+    fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify(body)
+    })
+    .then(function(res) {
+      return res.json().then(function(d) { return { ok: res.ok, data: d }; });
+    })
+    .then(function(r) {
+      if (r.ok) { onOk(r.data); } else { onErr(r.data.error || 'Request failed'); }
+    })
+    .catch(function() { onErr('Network error'); });
+  }
+
+  // --- Send payment -------------------------------------------------------
+  function submitSendPayment() {
+    var receiverID = document.getElementById('pay-receiver-sel').value;
+    var amount     = parseFloat(document.getElementById('pay-amount-inp').value || '0');
+    var note       = document.getElementById('pay-note-inp').value;
+    if (!receiverID) { showToast('Please select a recipient', 'warn'); return; }
+    if (amount <= 0) { showToast('Please enter a valid amount', 'warn'); return; }
+    apiPost('/payments/pay',
+      { receiver_id: receiverID, amount: amount, note: note, payment_type: 'direct' },
+      function() { closeSheet('pay'); showToast('Payment sent'); setTimeout(function() { location.reload(); }, 1200); },
+      function(e) { showToast(e, 'warn'); }
+    );
+  }
+
+  // --- Create BNPL loan ---------------------------------------------------
+  function submitBNPL() {
+    var receiverID = document.getElementById('bnpl-receiver-sel').value;
+    var amount     = parseFloat(document.getElementById('bnpl-amount-inp').value || '0');
+    var note       = document.getElementById('bnpl-note-inp').value;
+    var plan       = parseInt(document.getElementById('bnpl-plan-sel').value || '4', 10);
+    if (!receiverID) { showToast('Please select a recipient', 'warn'); return; }
+    if (amount <= 0) { showToast('Please enter a valid amount', 'warn'); return; }
+    apiPost('/bnpl/loan/create',
+      { receiver_id: receiverID, amount: amount, note: note, payment_type: 'bnpl', total_installments: plan },
+      function() { closeSheet('pay'); showToast('BNPL plan approved'); setTimeout(function() { location.reload(); }, 1200); },
+      function(e) { showToast(e, 'warn'); }
+    );
+  }
+
+  // --- Request money ------------------------------------------------------
+  function submitRequest() {
+    var payerID = document.getElementById('req-payer-sel').value;
+    var amount  = parseFloat(document.getElementById('req-amount-inp').value || '0');
+    var note    = document.getElementById('req-note-inp').value;
+    if (!payerID) { showToast('Please select a friend', 'warn'); return; }
+    if (amount <= 0) { showToast('Please enter a valid amount', 'warn'); return; }
+    apiPost('/payments/request/create',
+      { payer_id: payerID, amount: amount, note: note },
+      function() { closeSheet('request'); showToast('Request sent'); },
+      function(e) { showToast(e, 'warn'); }
+    );
+  }
+
+  // --- Add friend ---------------------------------------------------------
+  function submitAddFriend() {
+    var id = document.getElementById('addfriend-id-inp').value.trim();
+    if (!id) { showToast('Please enter a user ID', 'warn'); return; }
+    apiPost('/friends/request/send',
+      { receiver_id: id },
+      function() { closeSheet('addfriend'); showToast('Friend request sent to @' + id); document.getElementById('addfriend-id-inp').value = ''; },
+      function(e) { showToast(e, 'warn'); }
+    );
+  }
+
+  // --- Remove friend (optimistic UI + real API) ---------------------------
+  function removeFriend(btn, friendID, name) {
+    apiPost('/friends/remove',
+      { friend_id: friendID },
+      function() {
+        var row = btn.closest('.friend-row');
+        row.style.transition = 'opacity .2s, transform .2s';
+        row.style.opacity = '0';
+        row.style.transform = 'translateX(-20px)';
+        setTimeout(function() {
+          row.remove();
+          showToast(name + ' removed');
+          var remaining = document.querySelectorAll('#friend-list .friend-row').length;
+          if (remaining === 0) {
+            document.getElementById('friend-list').style.display = 'none';
+            document.getElementById('friends-empty').style.display = 'block';
+          }
+        }, 200);
+      },
+      function(e) { showToast(e, 'warn'); }
+    );
+  }
+
+  // --- Pay single installment ---------------------------------------------
+  function payInstallment(installmentID, paymentID, amount) {
+    apiPost('/bnpl/installment/pay',
+      { installment_id: installmentID, payment_id: paymentID, amount: amount },
+      function() { showToast('Installment paid'); setTimeout(function() { location.reload(); }, 1200); },
+      function(e) { showToast(e, 'warn'); }
+    );
+  }
+
+  // --- Pay all overdue installments ---------------------------------------
+  function payAllOverdue() {
+    var rows = document.querySelectorAll('[data-installment-id]');
+    if (!rows.length) { showToast('No overdue installments'); return; }
+    var pending = rows.length, failed = 0;
+    rows.forEach(function(row) {
+      var iid = row.getAttribute('data-installment-id');
+      var pid = row.getAttribute('data-payment-id');
+      var amt = parseFloat(row.getAttribute('data-amount') || '0');
+      fetch('/bnpl/installment/pay', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ installment_id: iid, payment_id: pid, amount: amt })
+      })
+      .then(function(res) { if (!res.ok) failed++; })
+      .catch(function() { failed++; })
+      .finally(function() {
+        pending--;
+        if (pending === 0) {
+          if (failed > 0) { showToast(failed + ' payment(s) failed', 'warn'); }
+          else { showToast('All overdue installments paid'); }
+          setTimeout(function() { location.reload(); }, 1200);
+        }
+      });
+    });
+  }
+
+  // --- Friends search filter ----------------------------------------------
   function filterFriends(q) {
     q = (q || '').toLowerCase().trim();
     var rows = document.querySelectorAll('#friend-list .friend-row');
@@ -1540,39 +1805,23 @@ func dashboardScript() string {
       r.style.display = match ? '' : 'none';
       if (match) visible++;
     });
-    var list = document.getElementById('friend-list');
-    list.style.opacity = visible === 0 && q ? '0.4' : '1';
-  }
-  function removeFriend(btn, name) {
-    var row = btn.closest('.friend-row');
-    row.style.transition = 'opacity .2s, transform .2s';
-    row.style.opacity = '0';
-    row.style.transform = 'translateX(-20px)';
-    setTimeout(function() {
-      row.remove();
-      showToast(name + ' removed');
-      var remaining = document.querySelectorAll('#friend-list .friend-row').length;
-      if (remaining === 0) {
-        document.getElementById('friend-list').style.display = 'none';
-        document.getElementById('friends-empty').style.display = 'block';
-      }
-    }, 200);
+    document.getElementById('friend-list').style.opacity = (visible === 0 && q) ? '0.4' : '1';
   }
 
-  // --- Sign out ----------------------------------------------------------
+  // --- Sign out -----------------------------------------------------------
   function signOut() {
     fetch('/users/logout', { method: 'POST', credentials: 'same-origin' })
-      .then(function() { window.location.reload(); })
+      .then(function() { location.reload(); })
       .catch(function() {
         document.cookie = 'session_user_id=; Max-Age=0; path=/';
-        window.location.reload();
+        location.reload();
       });
   }
 
-  // --- Esc closes any open sheet -----------------------------------------
+  // --- Esc closes any open sheet ------------------------------------------
   document.addEventListener('keydown', function(e) {
     if (e.key === 'Escape') {
-      closeSheet('pay'); closeSheet('request');
+      closeSheet('pay'); closeSheet('request'); closeSheet('addfriend');
     }
   });
 </script>
