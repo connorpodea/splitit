@@ -103,6 +103,7 @@ func loginHTML() string {
     .btn-main { width: 100%; background: #6366f1; color: #fff; border: none; border-radius: 12px; padding: 13px; font-size: 15px; font-weight: 600; cursor: pointer; transition: background 0.2s, transform 0.1s; letter-spacing: -0.01em; font-family: inherit; }
     .btn-main:hover { background: #4f46e5; }
     .btn-main:active { transform: scale(0.98); }
+    .btn-main:active { transform: scale(0.98); }
     .lbl { display: block; font-size: 11px; color: #64748b; margin-bottom: 6px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
   </style>
 
@@ -228,17 +229,6 @@ func registerHTML() string {
 
 // ---------------------------------------------------------------------------
 // DASHBOARD
-// Polished, responsive, multi-view shell that addresses the feedback:
-//   - Two main actions only (Pay, Request). BNPL is a tab inside Pay.
-//   - Splitit Score (renamed from Credit Score) lives on the Profile view,
-//     not the main dashboard — Home stays uncluttered.
-//   - Real bottom tab bar on mobile, sidebar on desktop.
-//   - Working sign-out via /users/logout.
-//   - Profile button opens the Profile tab (friend count + scrollable list).
-//   - Avatar uses FL initials from the user's real name.
-//   - Realistic mock data for activity, payments, installments, friends.
-//   - Empty states wired up for overdue, friends, and activity.
-//
 // ---------------------------------------------------------------------------
 func dashboardHTML(user *models.User) string {
 	name := displayName(user)
@@ -254,7 +244,6 @@ func dashboardHTML(user *models.User) string {
 <div id="app-root" class="app-shell">
   <div id="toast"></div>
 
-  <!-- ============== TOP BAR ============== -->
   <header class="topbar">
     <div class="topbar-inner">
       <button class="brand-btn" data-tab="home" onclick="goView('home')" aria-label="Home">
@@ -271,7 +260,6 @@ func dashboardHTML(user *models.User) string {
   </header>
 
   <div class="app-body">
-    <!-- ============== SIDEBAR (desktop only) ============== -->
     <aside class="sidebar">
       <nav class="side-nav">
         <button class="side-link active" data-tab="home" onclick="goView('home')">
@@ -287,12 +275,12 @@ func dashboardHTML(user *models.User) string {
           Social
         </button>
         <button class="side-link" data-tab="analytics" onclick="goView('analytics')">
-  		  <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 0 1 3 19.875v-6.75Z" /><path stroke-linecap="round" stroke-linejoin="round" d="M9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V8.625Z" /><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V4.125Z" /></svg>
-  		  Analytics
+          <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 0 1 3 19.875v-6.75Z" /><path stroke-linecap="round" stroke-linejoin="round" d="M9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V8.625Z" /><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V4.125Z" /></svg>
+          Analytics
         </button>
 		<button class="side-link" data-tab="wallet" onclick="goView('wallet')">
-  		  <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M21 12a2.25 2.25 0 0 0-2.25-2.25H15a3 3 0 1 1-6 0H5.25A2.25 2.25 0 0 0 3 12m18 0v6A2.25 2.25 0 0 1 18.75 20H5.25A2.25 2.25 0 0 1 3 18v-6m18 0V9A2.25 2.25 0 0 0 18.75 6.75H5.25A2.25 2.25 0 0 0 3 9v3M16.5 10.5a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5Z" /></svg>
-  		  Wallet
+          <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M21 12a2.25 2.25 0 0 0-2.25-2.25H15a3 3 0 1 1-6 0H5.25A2.25 2.25 0 0 0 3 12m18 0v6A2.25 2.25 0 0 1 18.75 20H5.25A2.25 2.25 0 0 1 3 18v-6m18 0V9A2.25 2.25 0 0 0 18.75 6.75H5.25A2.25 2.25 0 0 0 3 9v3M16.5 10.5a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5Z" /></svg>
+          Wallet
 		</button>
         <button class="side-link" data-tab="profile" onclick="goView('profile')">
           <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
@@ -302,9 +290,9 @@ func dashboardHTML(user *models.User) string {
           <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.43l-1.003.767a1.123 1.123 0 0 0-.417 1.03c.004.074.006.148.006.222 0 .074-.002.148-.006.222a1.123 1.123 0 0 0 .417 1.03l1.003.767a1.125 1.125 0 0 1 .26 1.43l-1.296 2.247a1.125 1.125 0 0 1-1.37.49l-1.216-.456a1.125 1.125 0 0 0-1.075.124c-.073.044-.146.087-.22.128c-.332.183-.582.495-.645.869l-.213 1.28c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281a1.125 1.125 0 0 0-.646-.87c-.074-.04-.148-.083-.22-.127a1.124 1.124 0 0 0-1.075-.124l-1.217.456a1.125 1.125 0 0 1-1.37-.49l-1.296-2.247a1.125 1.125 0 0 1 .26-1.43l1.003-.767a1.122 1.122 0 0 0 .417-1.03c-.004-.074-.006-.148-.006-.222 0-.074.002-.148.006-.222a1.122 1.122 0 0 0-.417-1.03l-1.003-.767a1.125 1.125 0 0 1-.26-1.43l1.296-2.247a1.125 1.125 0 0 1 1.37-.49l1.216.456c.356.133.751.072 1.076-.124.072-.041.146-.084.218-.128.332-.183.582-.495.646-.869l.213-1.28Z" /><circle cx="12" cy="12" r="3" /></svg>
           Settings
 		</button>
-		<button class="side-link" data-tab="logout" onclick="goView('logout')">
-		  <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15M12 9l-3 3m0 0 3 3m-3-3h12.75" /></svg>
-  		  Logout
+		<button class="side-link" onclick="signOut()" style="color: #fca5a5;">
+  		  <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+  		  Sign out
 		</button>
       </nav>
       <div class="side-promo">
@@ -314,7 +302,6 @@ func dashboardHTML(user *models.User) string {
       </div>
     </aside>
 
-    <!-- ============== MAIN CONTENT ============== -->
     <main class="content">
 ` + viewHome(name) + `
 ` + viewActivity() + `
@@ -323,7 +310,6 @@ func dashboardHTML(user *models.User) string {
     </main>
   </div>
 
-  <!-- ============== BOTTOM TAB BAR (mobile/tablet) ============== -->
   <nav class="tabbar">
     <button class="tab active" data-tab="home" onclick="goView('home')">
       <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M3 12l9-9 9 9"/><path d="M5 10v10h14V10"/></svg>
@@ -338,7 +324,7 @@ func dashboardHTML(user *models.User) string {
       <span>Social</span>
     </button>
     <button class="tab" data-tab="profile" onclick="goView('profile')">
-      <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+      <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
       <span>Profile</span>
     </button>
   </nav>
@@ -350,8 +336,6 @@ func dashboardHTML(user *models.User) string {
 }
 
 // dashboardStyles bundles all CSS for the dashboard into a single <style> block.
-// Splitting CSS across files would force a Tailwind/build step which this server
-// intentionally doesn't have.
 func dashboardStyles() string {
 	return `
 <style>
@@ -381,7 +365,16 @@ func dashboardStyles() string {
     --rose-hi: #f87171;
   }
 
-  /* Reset on the master canvas to get rid of the default p-4 flex centering */
+  /* Responsive layout helpers for structural toggling */
+  .desktop-only { display: flex !important; }
+  .mobile-only { display: none !important; }
+
+  @media (max-width: 1023px) {
+    .desktop-only { display: none !important; }
+    .mobile-only { display: flex !important; }
+  }
+
+  /* Reset on the master canvas */
   #main-application-viewport { max-width: 100% !important; padding: 0 !important; }
   body { background: var(--bg) !important; padding: 0 !important; display: block !important; min-height: 100vh; align-items: initial !important; justify-content: initial !important; }
 
@@ -453,7 +446,6 @@ func dashboardStyles() string {
   .view { display: none; animation: fadeUp .35s cubic-bezier(0.16, 1, 0.3, 1) both; }
   .view.active { display: block; }
   @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
-  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 
   /* --------- BALANCE HERO --------- */
   .hero {
@@ -560,7 +552,6 @@ func dashboardStyles() string {
   .row-amt.bnpl { color: var(--indigo-hi); }
   .row-time { color: var(--text-faint); font-size: 11px; margin-top: 2px; }
 
-  /* Avatar color presets (used inline by data) */
   .av-indigo { background: var(--indigo-soft); color: var(--indigo-hi); }
   .av-amber  { background: #1c0a00; color: var(--amber-hi); }
   .av-emerald { background: var(--emerald-soft); color: var(--emerald-hi); }
@@ -568,7 +559,6 @@ func dashboardStyles() string {
   .av-violet { background: #1a0533; color: #c084fc; }
   .av-cyan { background: #042f2e; color: #5eead4; }
   .av-pink { background: #4a044e; color: #f0abfc; }
-  .av-slate { background: var(--surface-2); color: var(--text-dim); border: 1px solid var(--border); }
 
   /* --------- ACTIVITY VIEW (sub-tabs) --------- */
   .subtabs {
@@ -629,7 +619,6 @@ func dashboardStyles() string {
   }
   .pill.warn { background: rgba(239, 68, 68, 0.15); color: var(--rose-hi); }
   .pill.ok { background: var(--emerald-soft); color: var(--emerald-hi); }
-  .pill.muted { background: var(--surface-3); color: var(--text-dim); }
 
   .progress {
     height: 4px; border-radius: 2px;
@@ -799,7 +788,7 @@ func dashboardStyles() string {
   .tab.active { color: var(--indigo-hi); }
   .tab:active { background: var(--surface-2); }
 
-  /* --------- SHEETS (Pay + Request) --------- */
+  /* --------- SHEETS --------- */
   .sheet-backdrop {
     display: none;
     position: fixed; inset: 0; z-index: 60;
@@ -905,9 +894,6 @@ func dashboardStyles() string {
 
   /* ===================================================================
      RESPONSIVE BREAKPOINTS
-     - Mobile (default): single column, bottom tab bar.
-     - Tablet (≥ 640px): wider content, 2-col stat layouts.
-     - Desktop (≥ 1024px): left sidebar, no bottom tab bar.
      =================================================================== */
   @media (min-width: 640px) {
     .content { padding: 28px 24px 96px; max-width: 760px; }
@@ -958,8 +944,7 @@ func dashboardStyles() string {
 }
 
 // ---------------------------------------------------------------------------
-// HOME VIEW — balance hero, two primary actions, quick stats, recent activity.
-// Splitit Score is intentionally absent here (lives on Profile per the IA brief).
+// HOME VIEW
 // ---------------------------------------------------------------------------
 func viewHome(name string) string {
 	firstName := strings.Fields(name)
@@ -971,7 +956,6 @@ func viewHome(name string) string {
 <section class="view active" data-view="home">
   <div class="greeting" style="font-size:14px; color:var(--text-mute); margin-bottom:14px;">Welcome back, <b style="color:var(--text);">` + greet + `</b></div>
 
-  <!-- Balance hero -->
   <div class="hero">
     <div class="hero-label">Available balance</div>
     <div class="hero-amount mono">$1,247<span class="cents">.30</span></div>
@@ -982,7 +966,6 @@ func viewHome(name string) string {
     </div>
   </div>
 
-  <!-- Primary actions (just two now: Pay and Request). BNPL lives inside Pay. -->
   <div class="actions">
     <button class="action req" onclick="openSheet('request')">
       <span class="ico"><svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 5v14"/><path d="M5 12h14"/></svg></span>
@@ -994,7 +977,6 @@ func viewHome(name string) string {
     </button>
   </div>
 
-  <!-- Quick stats: gently surface urgency (overdue is red) -->
   <div class="quick-strip">
     <button class="qstat warn" onclick="goView('activity', 'overdue')">
       <div>
@@ -1012,7 +994,6 @@ func viewHome(name string) string {
     </button>
   </div>
 
-  <!-- Recent activity (preview of 5; full list in Activity tab) -->
   <div class="section-row">
     <h2>Recent activity</h2>
     <button class="linklike" onclick="goView('activity')">See all</button>
@@ -1064,8 +1045,7 @@ func viewHome(name string) string {
 }
 
 // ---------------------------------------------------------------------------
-// ACTIVITY VIEW — sub-tabs for Payments / Active installments / Overdue.
-// Overdue uses warning treatment; empty states render a friendly success card.
+// ACTIVITY VIEW
 // ---------------------------------------------------------------------------
 func viewActivity() string {
 	return `
@@ -1080,7 +1060,6 @@ func viewActivity() string {
     <button class="subtab" data-pane="overdue" onclick="goPane(this)">Overdue <span class="badge mono">2</span></button>
   </div>
 
-  <!-- ============ PAYMENTS PANE ============ -->
   <div data-pane-content="all" class="pane-content">
     <div class="card">
       <div class="row">
@@ -1136,7 +1115,6 @@ func viewActivity() string {
     </div>
   </div>
 
-  <!-- ============ ACTIVE INSTALLMENTS PANE ============ -->
   <div data-pane-content="active" class="pane-content" style="display:none;">
     <div class="card">
       <div class="row">
@@ -1169,9 +1147,7 @@ func viewActivity() string {
     </div>
   </div>
 
-  <!-- ============ OVERDUE PANE ============ -->
   <div data-pane-content="overdue" class="pane-content" style="display:none;">
-    <!-- Banner with urgency treatment -->
     <div class="overdue-banner">
       <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
       <div class="ob-text">
@@ -1202,9 +1178,6 @@ func viewActivity() string {
       </div>
     </div>
 
-    <!-- Empty state for when there's nothing overdue.
-         Hidden by default; the JS swaps in this card if the populated list above is removed.
-         Kept in the DOM so the toggle is instant. -->
     <div class="empty" style="display:none;" data-empty="overdue">
       <div class="empty-icon success">
         <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
@@ -1218,8 +1191,7 @@ func viewActivity() string {
 }
 
 // ---------------------------------------------------------------------------
-// FRIENDS VIEW — count header, search, scrollable list, per-friend actions.
-// Includes a hidden empty-state card for the brand-new-user scenario.
+// FRIENDS VIEW
 // ---------------------------------------------------------------------------
 func viewFriends() string {
 	return `
@@ -1241,7 +1213,6 @@ func viewFriends() string {
 ` + friendsRows() + `
   </div>
 
-  <!-- Empty state shown if user has zero friends. -->
   <div class="empty" id="friends-empty" style="display:none;">
     <div class="empty-icon">
       <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
@@ -1299,8 +1270,7 @@ func friendsRows() string {
 }
 
 // ---------------------------------------------------------------------------
-// PROFILE VIEW — user info, Splitit Score gauge, BNPL limit, stats, menu, sign out.
-// The Splitit Score sits here (not on Home) per the IA brief.
+// PROFILE VIEW
 // ---------------------------------------------------------------------------
 func viewProfile(_ *models.User, avatar, name, handle, email, phone_number string) string {
 	return `
@@ -1313,7 +1283,6 @@ func viewProfile(_ *models.User, avatar, name, handle, email, phone_number strin
 	<div class="profile-phone_number">` + phone_number + `</div>
   </div>
 
-  <!-- Splitit Score (the renamed Credit Score) -->
   <div class="score-card">
     <div class="score-header">
       <div class="score-title">Splitit Score</div>
@@ -1341,27 +1310,22 @@ func viewProfile(_ *models.User, avatar, name, handle, email, phone_number strin
   </div>
 
   <div class="menu-list">
-    <button class="menu-item" onclick="goView('friends')">
-      <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-      Manage friends
+    <button class="menu-item mobile-only" onclick="goView('analytics')">
+      <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 0 1 3 19.875v-6.75Z" /><path stroke-linecap="round" stroke-linejoin="round" d="M9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V8.625Z" /><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V4.125Z" /></svg>
+      Analytics
       <svg class="chev" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
     </button>
-    <button class="menu-item" onclick="showToast('Payment methods coming soon')">
-      <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
-      Payment methods
+    <button class="menu-item mobile-only" onclick="goView('wallet')">
+      <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M21 12a2.25 2.25 0 0 0-2.25-2.25H15a3 3 0 1 1-6 0H5.25A2.25 2.25 0 0 0 3 12m18 0v6A2.25 2.25 0 0 1 18.75 20H5.25A2.25 2.25 0 0 1 3 18v-6m18 0V9A2.25 2.25 0 0 0 18.75 6.75H5.25A2.25 2.25 0 0 0 3 9v3M16.5 10.5a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5Z" /></svg>
+      Wallet
       <svg class="chev" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
     </button>
-    <button class="menu-item" onclick="showToast('Edit profile coming soon')">
-      <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-      Edit profile
-      <svg class="chev" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
-    </button>
-    <button class="menu-item" onclick="showToast('Settings coming soon')">
+    <button class="menu-item mobile-only" onclick="goView('settings')">
       <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
       Settings
       <svg class="chev" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
     </button>
-    <button class="menu-item danger" onclick="signOut()">
+    <button class="menu-item danger mobile-only" onclick="signOut()">
       <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
       Sign out
     </button>
@@ -1371,8 +1335,7 @@ func viewProfile(_ *models.User, avatar, name, handle, email, phone_number strin
 }
 
 // ---------------------------------------------------------------------------
-// PAY SHEET — Send and BNPL as TABS within a single flow.
-// (Per feedback: BNPL is no longer a separate top-level action.)
+// PAY SHEET
 // ---------------------------------------------------------------------------
 func paySheetHTML() string {
 	return `
@@ -1385,7 +1348,6 @@ func paySheetHTML() string {
       <button class="sheet-tab" data-paytab="bnpl" onclick="payTab(this)">Buy now, pay later</button>
     </div>
 
-    <!-- ============ SEND PANE ============ -->
     <div class="sheet-pane active" data-pay-pane="send">
       <div class="amount-big mono"><span class="dollar">$</span><span id="send-amt">0.00</span></div>
       <div class="chip-row" style="justify-content:center;">
@@ -1416,7 +1378,6 @@ func paySheetHTML() string {
       <button class="submit-btn" onclick="submitPayment('Payment sent successfully')">Send payment</button>
     </div>
 
-    <!-- ============ BNPL PANE (nested inside Pay) ============ -->
     <div class="sheet-pane" data-pay-pane="bnpl">
       <div class="info-card">
         <span class="label">Available credit</span>
@@ -1456,7 +1417,7 @@ func paySheetHTML() string {
 }
 
 // ---------------------------------------------------------------------------
-// REQUEST SHEET — single pane, asks a friend for money.
+// REQUEST SHEET
 // ---------------------------------------------------------------------------
 func requestSheetHTML() string {
 	return `
@@ -1498,8 +1459,7 @@ func requestSheetHTML() string {
 }
 
 // ---------------------------------------------------------------------------
-// CLIENT SCRIPT — view router, sheets, sign-out via real /users/logout endpoint.
-// Note: no JS template literals (Go raw strings can't nest backticks).
+// CLIENT SCRIPT
 // ---------------------------------------------------------------------------
 func dashboardScript() string {
 	return `
@@ -1513,7 +1473,6 @@ func dashboardScript() string {
       btn.classList.toggle('active', btn.getAttribute('data-tab') === name);
     });
     if (subpane && name === 'activity') {
-      // Wait one frame so the view is visible before clicking the sub-tab.
       requestAnimationFrame(function() {
         var btn = document.querySelector('[data-pane="' + subpane + '"]');
         if (btn) btn.click();
@@ -1548,11 +1507,11 @@ func dashboardScript() string {
     });
   }
 
-  // --- Amount chip helpers (Send + Request) ------------------------------
+  // --- Amount chip helpers ----------------------------------------------
   function setSendAmt(v) { document.getElementById('send-amt').textContent = v.toFixed(2); }
   function setReqAmt(v)  { document.getElementById('req-amt').textContent  = v.toFixed(2); }
 
-  // --- Submit (mocked — closes sheet, fires toast) -----------------------
+  // --- Submit -------------------------------------------------------------
   function submitPayment(msg) {
     closeSheet('pay');
     closeSheet('request');
@@ -1581,8 +1540,6 @@ func dashboardScript() string {
       r.style.display = match ? '' : 'none';
       if (match) visible++;
     });
-    // If filter wipes the list to zero, show a soft "no results" — toggle list
-    // visibility but keep the dedicated empty state for the no-friends case.
     var list = document.getElementById('friend-list');
     list.style.opacity = visible === 0 && q ? '0.4' : '1';
   }
@@ -1594,7 +1551,6 @@ func dashboardScript() string {
     setTimeout(function() {
       row.remove();
       showToast(name + ' removed');
-      // If we drained the list, flip to the empty-state card.
       var remaining = document.querySelectorAll('#friend-list .friend-row').length;
       if (remaining === 0) {
         document.getElementById('friend-list').style.display = 'none';
@@ -1603,13 +1559,11 @@ func dashboardScript() string {
     }, 200);
   }
 
-  // --- Sign out (real call to /users/logout) -----------------------------
+  // --- Sign out ----------------------------------------------------------
   function signOut() {
     fetch('/users/logout', { method: 'POST', credentials: 'same-origin' })
       .then(function() { window.location.reload(); })
       .catch(function() {
-        // Even if the call fails (network), clear the cookie client-side
-        // and reload — failing closed.
         document.cookie = 'session_user_id=; Max-Age=0; path=/';
         window.location.reload();
       });
