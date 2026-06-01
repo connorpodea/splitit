@@ -60,6 +60,27 @@ type FriendRequest struct {
 	CreatedAt  string `json:"created_at"`
 }
 
+type Group struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	CreatorID string `json:"creator_id"`
+	CreatedAt string `json:"created_at"`
+}
+
+type GroupInvitation struct {
+	ID         string `json:"id"`
+	GroupID    string `json:"group_id"`
+	SenderID   string `json:"sender_id"`
+	ReceiverID string `json:"receiver_id"`
+	CreatedAt  string `json:"created_at"`
+}
+
+type GroupMember struct {
+	GroupID  string `json:"group_id"`
+	MemberID string `json:"member_id"`
+	JoinedAt string `json:"joined_at"`
+}
+
 type Notification struct {
 	ID        string `json:"id"`
 	UserID    string `json:"user_id"`
