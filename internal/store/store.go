@@ -1,7 +1,9 @@
 package store
 
 import (
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"fmt"
 	"math"
 	"time"
@@ -10,6 +12,12 @@ import (
 	"github.com/connorpodea/splitit/internal/models"
 	_ "modernc.org/sqlite"
 )
+
+func newID() string {
+	b := make([]byte, 12)
+	rand.Read(b)
+	return hex.EncodeToString(b)
+}
 
 type Store struct {
 	db *sql.DB
@@ -158,6 +166,25 @@ func (s *Store) createTables() error {
 	created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 	FOREIGN KEY (sender_id) REFERENCES users (id),
 	FOREIGN KEY (receiver_id) REFERENCES users (id)
+	);`
+
+	_, err = s.db.Exec(query)
+	if err != nil {
+		return err
+	}
+
+	// notifications table
+	query = `
+	CREATE TABLE IF NOT EXISTS notifications (
+	id TEXT PRIMARY KEY,
+	user_id TEXT,
+	type TEXT,
+	title TEXT,
+	body TEXT,
+	link_view TEXT,
+	is_seen INTEGER DEFAULT 0,
+	created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+	FOREIGN KEY (user_id) REFERENCES users (id)
 	);`
 
 	_, err = s.db.Exec(query)
@@ -331,6 +358,13 @@ func (s *Store) Pay(payment *models.Payment) error {
 		return fmt.Errorf("critical engine tracking mismatch: failed to write block modifications to disk on final commit sequence: %w", err)
 	}
 
+	s.CreateNotification(&models.Notification{
+		UserID:   payment.ReceiverID,
+		Type:     "payment_received",
+		Title:    "Payment received",
+		Body:     fmt.Sprintf("@%s paid you $%.2f", payment.SenderID, payment.Amount),
+		LinkView: "activity",
+	})
 	return nil
 }
 
@@ -359,6 +393,13 @@ func (s *Store) CreatePaymentRequest(request *models.PaymentRequest) error {
 	if err != nil {
 		return fmt.Errorf("failed to push open payment demand requisition with invoice ID '%s' into table ledgers: %w", request.ID, err)
 	}
+	s.CreateNotification(&models.Notification{
+		UserID:   request.PayerID,
+		Type:     "payment_request",
+		Title:    "Payment request",
+		Body:     fmt.Sprintf("@%s is requesting $%.2f from you", request.RequesterID, request.Amount),
+		LinkView: "activity",
+	})
 	return nil
 }
 
@@ -815,7 +856,7 @@ func (s *Store) ListOverdueInstallments(userID string) ([]*models.Installment, e
 
 func (s *Store) SendFriendRequest(request *models.FriendRequest) error {
 	query := `
-	INSERT INTO friend_requests 
+	INSERT INTO friend_requests
 	(id, sender_id, receiver_id)
 	VALUES (?,?,?);`
 
@@ -823,6 +864,13 @@ func (s *Store) SendFriendRequest(request *models.FriendRequest) error {
 	if err != nil {
 		return fmt.Errorf("failed to insert pending relationship record for invitation request ID '%s': %w", request.ID, err)
 	}
+	s.CreateNotification(&models.Notification{
+		UserID:   request.ReceiverID,
+		Type:     "friend_request",
+		Title:    "New friend request",
+		Body:     "@" + request.SenderID + " wants to be your friend",
+		LinkView: "social",
+	})
 	return nil
 }
 
@@ -920,6 +968,13 @@ func (s *Store) AcceptFriendRequest(requestID, senderID, receiverID string) erro
 	if err = transaction.Commit(); err != nil {
 		return fmt.Errorf("friend request acceptance failed: database transaction failed to commit to disk: %w", err)
 	}
+	s.CreateNotification(&models.Notification{
+		UserID:   senderID,
+		Type:     "friend_accepted",
+		Title:    "Friend request accepted",
+		Body:     "@" + receiverID + " accepted your friend request",
+		LinkView: "social",
+	})
 	return nil
 }
 
@@ -978,4 +1033,79 @@ func (s *Store) ListFriends(userID string) ([]*models.Profile, error) {
 		return nil, fmt.Errorf("detected structural cursor disruption within active user friends list scanner loop for ID '%s': %w", userID, err)
 	}
 	return friends, nil
+}
+
+// NEW FEATURE : GROUPS
+
+func (s *Store) SendGroupInvitation() {
+}
+
+func (s *Store) ListIncomingGroupInvitations() {
+}
+
+func (s *Store) ListOutgoingGroupInvitations() {
+}
+
+func (s *Store) AcceptGroupInvitation() {
+}
+
+func (s *Store) DeclineGroupInvitation() {
+}
+
+func (s *Store) LeaveGroup() {
+}
+
+func (s *Store) ListGroups() {
+}
+
+func (s *Store) CreateNotification(n *models.Notification) error {
+	if n.ID == "" {
+		n.ID = newID()
+	}
+	_, err := s.db.Exec(
+		`INSERT INTO notifications (id, user_id, type, title, body, link_view) VALUES (?,?,?,?,?,?);`,
+		n.ID, n.UserID, n.Type, n.Title, n.Body, n.LinkView,
+	)
+	return err
+}
+
+func (s *Store) ListNotifications(userID string) ([]*models.Notification, error) {
+	rows, err := s.db.Query(
+		`SELECT id, user_id, type, title, body, link_view, is_seen, created_at
+		 FROM notifications WHERE user_id = ? AND is_seen = 0
+		 ORDER BY created_at DESC;`,
+		userID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var notifs []*models.Notification
+	for rows.Next() {
+		var n models.Notification
+		var isSeen int
+		if err := rows.Scan(&n.ID, &n.UserID, &n.Type, &n.Title, &n.Body, &n.LinkView, &isSeen, &n.CreatedAt); err != nil {
+			return nil, err
+		}
+		n.IsSeen = isSeen == 1
+		notifs = append(notifs, &n)
+	}
+	return notifs, rows.Err()
+}
+
+func (s *Store) MarkNotificationSeen(notifID, userID string) error {
+	_, err := s.db.Exec(
+		`UPDATE notifications SET is_seen = 1 WHERE id = ? AND user_id = ?;`,
+		notifID, userID,
+	)
+	return err
+}
+
+func (s *Store) ClearAllNotifications(userID string) error {
+	_, err := s.db.Exec(
+		`UPDATE notifications SET is_seen = 1 WHERE user_id = ?;`,
+		userID,
+	)
+	return err
 }

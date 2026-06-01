@@ -59,3 +59,14 @@ type FriendRequest struct {
 	ReceiverID string `json:"receiver_id"`
 	CreatedAt  string `json:"created_at"`
 }
+
+type Notification struct {
+	ID        string `json:"id"`
+	UserID    string `json:"user_id"`
+	Type      string `json:"type"`
+	Title     string `json:"title"`
+	Body      string `json:"body"`
+	LinkView  string `json:"link_view"`
+	IsSeen    bool   `json:"is_seen"`
+	CreatedAt string `json:"created_at"`
+}

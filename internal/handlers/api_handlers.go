@@ -3,6 +3,8 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"regexp"
+	"strings"
 
 	"github.com/connorpodea/splitit/internal/models"
 	"github.com/connorpodea/splitit/internal/store"
@@ -68,6 +70,12 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON request payload formatting or missing account properties"})
 		return
 	}
+	input.ID = strings.ToLower(strings.TrimSpace(input.ID))
+	input.Name = strings.ToLower(strings.TrimSpace(input.Name))
+	if !regexp.MustCompile(`^[a-z0-9_]+$`).MatchString(input.ID) {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Username may only contain letters, numbers, and underscores"})
+		return
+	}
 
 	// Turn plain text password into a non-reversible cryptographic hash (bcrypt.DefaultCost tells it to scramble the password 14 times)
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(input.Password), bcrypt.DefaultCost)
@@ -119,6 +127,8 @@ func (h *Handler) LoginUser(w http.ResponseWriter, r *http.Request) {
 		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON request payload formatting"})
 		return
 	}
+
+	input.ID = strings.ToLower(strings.TrimSpace(input.ID))
 
 	// Look up the user by ID
 	user, err := h.store.GetUser(input.ID)
@@ -809,5 +819,62 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	}
 	http.SetCookie(w, expired)
 
+	WriteJSON(w, http.StatusOK, map[string]bool{"success": true})
+}
+
+func (h *Handler) ListNotifications(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only GET requests are permitted on this route"})
+		return
+	}
+	userID, authorized := h.authenticateSession(w, r)
+	if !authorized {
+		return
+	}
+	notifs, err := h.store.ListNotifications(userID)
+	if err != nil {
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	WriteJSON(w, http.StatusOK, notifs)
+}
+
+func (h *Handler) MarkNotificationSeen(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only POST requests are permitted on this route"})
+		return
+	}
+	userID, authorized := h.authenticateSession(w, r)
+	if !authorized {
+		return
+	}
+	type Input struct {
+		NotifID string `json:"notif_id"`
+	}
+	var input Input
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil || input.NotifID == "" {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Missing notif_id"})
+		return
+	}
+	if err := h.store.MarkNotificationSeen(input.NotifID, userID); err != nil {
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	WriteJSON(w, http.StatusOK, map[string]bool{"success": true})
+}
+
+func (h *Handler) ClearAllNotifications(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only POST requests are permitted on this route"})
+		return
+	}
+	userID, authorized := h.authenticateSession(w, r)
+	if !authorized {
+		return
+	}
+	if err := h.store.ClearAllNotifications(userID); err != nil {
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
 	WriteJSON(w, http.StatusOK, map[string]bool{"success": true})
 }

@@ -36,8 +36,13 @@ func (h *Handler) RegisterRoutes() {
 	http.HandleFunc("/friends/remove", h.RemoveFriendMutual)
 	http.HandleFunc("/friends/list", h.ListFriends)
 
+	// Notifications
+	http.HandleFunc("/notifications/list", h.ListNotifications)
+	http.HandleFunc("/notifications/seen", h.MarkNotificationSeen)
+	http.HandleFunc("/notifications/clear", h.ClearAllNotifications)
+
 	// UI Content Screens
 	http.HandleFunc("/ui/initial-view", h.GetInitialView)
 	http.HandleFunc("/ui/register-view", h.GetRegistrationView)
-	http.HandleFunc("/ui/dashboard-view", h.GetDashboardView) // Add this line
+	http.HandleFunc("/ui/dashboard-view", h.GetDashboardView)
 }

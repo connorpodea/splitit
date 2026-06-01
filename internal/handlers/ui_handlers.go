@@ -41,8 +41,12 @@ func (h *Handler) GetInitialView(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		friendRequests = []*models.FriendRequest{}
 	}
+	notifications, err := h.store.ListNotifications(user.ID)
+	if err != nil {
+		notifications = []*models.Notification{}
+	}
 
-	writeHTML(w, dashboardHTML(user, friends, installments, overdueInstallments, incomingRequests, friendRequests))
+	writeHTML(w, dashboardHTML(user, friends, installments, overdueInstallments, incomingRequests, friendRequests, notifications))
 }
 
 func (h *Handler) GetRegistrationView(w http.ResponseWriter, r *http.Request) {
@@ -81,8 +85,12 @@ func (h *Handler) GetDashboardView(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		friendRequests = []*models.FriendRequest{}
 	}
+	notifications, err := h.store.ListNotifications(user.ID)
+	if err != nil {
+		notifications = []*models.Notification{}
+	}
 
-	writeHTML(w, dashboardHTML(user, friends, installments, overdueInstallments, incomingRequests, friendRequests))
+	writeHTML(w, dashboardHTML(user, friends, installments, overdueInstallments, incomingRequests, friendRequests, notifications))
 }
 
 func writeHTML(w http.ResponseWriter, body string) {
@@ -145,7 +153,7 @@ func profileDisplayName(p *models.Profile) string {
 // DASHBOARD SHELL
 // ---------------------------------------------------------------------------
 
-func dashboardHTML(user *models.User, friends []*models.Profile, installments []*models.Installment, overdueInstallments []*models.Installment, incomingRequests []*models.PaymentRequest, friendRequests []*models.FriendRequest) string {
+func dashboardHTML(user *models.User, friends []*models.Profile, installments []*models.Installment, overdueInstallments []*models.Installment, incomingRequests []*models.PaymentRequest, friendRequests []*models.FriendRequest, notifications []*models.Notification) string {
 	name := displayName(user)
 	avatar := initials(name)
 	handle := user.ID
@@ -167,9 +175,11 @@ func dashboardHTML(user *models.User, friends []*models.Profile, installments []
 	}
 	scoreLabel := creditScoreLabel(user.CreditScore)
 	friendReqCount := len(friendRequests)
+	_ = friendReqCount
+	notifCount := len(notifications)
 
 	return dashboardStyles() + `
-<div id="app-root" class="app-shell">
+<div id="app-root" class="app-shell" data-uid="` + handle + `">
   <div id="toast"></div>
 
   <header class="topbar">
@@ -178,16 +188,11 @@ func dashboardHTML(user *models.User, friends []*models.Profile, installments []
         <span class="brand">split<span>it</span></span>
       </button>
       <div class="topbar-actions">
-        <button class="icon-btn" aria-label="Notifications" onclick="goView('social')" title="` + func() string {
-		if friendReqCount > 0 {
-			return fmt.Sprintf("%d pending friend request(s)", friendReqCount)
-		}
-		return "No new notifications"
-	}() + `">
+        <button class="icon-btn" aria-label="Notifications" onclick="goView('notifications')">
           <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
           ` + func() string {
-		if friendReqCount > 0 {
-			return `<span style="position:absolute;top:6px;right:6px;width:16px;height:16px;border-radius:50%;background:#ef4444;border:2px solid #0f172a;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:#fff;font-family:'JetBrains Mono',monospace;">` + fmt.Sprintf("%d", friendReqCount) + `</span>`
+		if notifCount > 0 {
+			return `<span style="position:absolute;top:6px;right:6px;width:16px;height:16px;border-radius:50%;background:#ef4444;border:2px solid #0f172a;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:#fff;font-family:'JetBrains Mono',monospace;">` + fmt.Sprintf("%d", notifCount) + `</span>`
 		}
 		return `<span class="dot"></span>`
 	}() + `
@@ -244,6 +249,7 @@ func dashboardHTML(user *models.User, friends []*models.Profile, installments []
 ` + viewHome(name, user, overdueInstallments, installments, incomingRequests) + `
 ` + viewActivity(installments, overdueInstallments, incomingRequests) + `
 ` + viewFriends(friends, friendRequests) + `
+` + viewNotifications(notifications) + `
 ` + viewProfile(user, avatar, name, handle, email, phone, friends, installments) + `
     </main>
   </div>
@@ -270,6 +276,7 @@ func dashboardHTML(user *models.User, friends []*models.Profile, installments []
 ` + paySheetHTML(friends, availableCredit) + `
 ` + requestSheetHTML(friends) + `
 ` + addFriendSheetHTML() + `
+` + sessionContextScript(handle, friends) + `
 ` + dashboardScript() + `
 </div>`
 }
@@ -297,10 +304,10 @@ func loginHTML() string {
   </style>
 
   <div style="text-align:center; margin-bottom: 36px;">
-    <div style="font-size: 34px; font-weight: 800; letter-spacing: -0.04em; color: #f8fafc; margin-bottom: 4px;">
+    <div style="font-size: 54px; font-weight: 800; letter-spacing: -0.04em; color: #f8fafc; margin-bottom: 4px;">
       split<span style="color: #6366f1;">it</span>
     </div>
-    <div style="font-size: 13px; color: #64748b;">Send money. Split bills. Pay later.</div>
+    <div style="font-size: 16px; color: #64748b;">Send money. Split bills. Pay later.</div>
   </div>
 
   <div style="background: #0f172a; border: 1px solid #1e293b; border-radius: 20px; padding: 28px 24px;">
@@ -368,8 +375,8 @@ func registerHTML() string {
   <div id="reg-toast">Account created successfully!</div>
 
   <div style="text-align:center; margin-bottom: 32px;">
-    <div style="font-size: 34px; font-weight: 800; letter-spacing: -0.04em; color: #f8fafc; margin-bottom: 4px;">split<span style="color: #6366f1;">it</span></div>
-    <div style="font-size: 13px; color: #64748b;">Join millions splitting smarter</div>
+    <div style="font-size: 54px; font-weight: 800; letter-spacing: -0.04em; color: #f8fafc; margin-bottom: 4px;">split<span style="color: #6366f1;">it</span></div>
+    <div style="font-size: 16px; color: #64748b;">Join millions splitting smarter</div>
   </div>
 
   <div style="background: #0f172a; border: 1px solid #1e293b; border-radius: 20px; padding: 28px 24px;">
@@ -380,6 +387,28 @@ func registerHTML() string {
           hx-post="/users/create"
           hx-ext="json-enc"
           hx-target="#reg-msg"
+          hx-on::before-request="
+            var showErr = function(msg) {
+              document.getElementById('reg-msg').innerHTML = '<div style=\'color:#f87171;background:#1c0a0a;border:1px solid #450a0a;border-radius:10px;padding:10px 14px;font-size:13px;font-weight:500\'>' + msg + '</div>';
+            };
+
+            var uid = document.getElementById('reg-uid').value.trim();
+            if (!uid) { event.preventDefault(); showErr('Please choose a username.'); return; }
+            if (!/^[a-zA-Z0-9_]+$/.test(uid)) { event.preventDefault(); showErr('Username may only contain letters, numbers, and underscores (_).'); return; }
+
+            var f = document.getElementById('reg-fname').value.trim();
+            var l = document.getElementById('reg-lname').value.trim();
+            if (!f || !l) { event.preventDefault(); showErr('Please enter your first and last name.'); return; }
+            document.getElementById('reg-fullname').value = f + ' ' + l;
+
+            var phoneEl = document.querySelector('[name=phone_number]');
+            if (phoneEl) phoneEl.value = phoneEl.value.replace(/\D/g, '');
+
+            var pw  = document.getElementById('reg-pw').value;
+            var cpw = document.getElementById('reg-cpw').value;
+            if (pw.length < 8)  { event.preventDefault(); showErr('Password must be at least 8 characters.'); return; }
+            if (pw !== cpw)     { event.preventDefault(); showErr('Passwords don’t match — please try again.'); return; }
+          "
           hx-on::response-error="
             const d = JSON.parse(event.detail.xhr.responseText);
             document.getElementById('reg-msg').innerHTML = '<div style=\'color:#f87171;background:#1c0a0a;border:1px solid #450a0a;border-radius:10px;padding:10px 14px;font-size:13px\'>' + (d.error || 'Could not create account') + '</div>';
@@ -395,13 +424,24 @@ func registerHTML() string {
             }
           "
           style="display:flex; flex-direction:column; gap:14px;">
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
-        <div><label class="lbl">User ID</label><input class="inp-plain" type="text" name="id" placeholder="your_handle" required /></div>
-        <div><label class="lbl">Full name</label><input class="inp-plain" type="text" name="name" placeholder="Jane Doe" required /></div>
+      <input type="hidden" name="name" id="reg-fullname" />
+      <div>
+        <label class="lbl">User ID</label>
+        <input class="inp-plain" type="text" name="id" id="reg-uid" placeholder="your_handle" required autocomplete="username"
+               oninput="
+                 var ok = /^[a-zA-Z0-9_]*$/.test(this.value);
+                 this.style.borderColor = (!ok && this.value) ? '#ef4444' : '';
+                 var h = document.getElementById('uid-hint');
+                 if (h) h.style.display = (!ok && this.value) ? 'block' : 'none';
+               " />
+        <div id="uid-hint" style="display:none; color:#f87171; font-size:12px; margin-top:5px; font-weight:500;">Only letters, numbers, and _ are allowed</div>
       </div>
-      <div><label class="lbl">Email</label><input class="inp-plain" type="email" name="email" placeholder="you@email.com" required /></div>
-      <div><label class="lbl">Phone</label><input class="inp-plain" type="tel" name="phone_number" placeholder="555-0199" required /></div>
-      <div><label class="lbl">Password</label><input class="inp-plain" type="password" name="password" placeholder="Min 8 characters" required /></div>
+      <div><label class="lbl">First name</label><input class="inp-plain" type="text" id="reg-fname" placeholder="First" autocomplete="given-name" /></div>
+      <div><label class="lbl">Last name</label><input class="inp-plain" type="text" id="reg-lname" placeholder="Last" autocomplete="family-name" /></div>
+      <div><label class="lbl">Email</label><input class="inp-plain" type="email" name="email" placeholder="you@email.com" required autocomplete="email" /></div>
+      <div><label class="lbl">Phone</label><input class="inp-plain" type="tel" name="phone_number" placeholder="123-456-7890" autocomplete="tel" /></div>
+      <div><label class="lbl">Password</label><input class="inp-plain" type="password" id="reg-pw" name="password" placeholder="Min 8 characters" autocomplete="new-password" /></div>
+      <div><label class="lbl">Confirm password</label><input class="inp-plain" type="password" id="reg-cpw" placeholder="Re-enter password" autocomplete="new-password" /></div>
       <div id="reg-msg"></div>
       <button class="btn-main" type="submit">Create account</button>
     </form>
@@ -837,6 +877,82 @@ func friendsRows(friends []*models.Profile) string {
 }
 
 // ---------------------------------------------------------------------------
+// NOTIFICATIONS VIEW
+// ---------------------------------------------------------------------------
+
+func viewNotifications(notifications []*models.Notification) string {
+	typeIcon := map[string]string{
+		"friend_request":   `<svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>`,
+		"friend_accepted":  `<svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><polyline points="16 11 18 13 22 9"/></svg>`,
+		"payment_received": `<svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>`,
+		"payment_request":  `<svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 5v14"/><path d="M5 12h14"/></svg>`,
+	}
+	typeColor := map[string]string{
+		"friend_request":   "av-indigo",
+		"friend_accepted":  "av-emerald",
+		"payment_received": "av-emerald",
+		"payment_request":  "av-amber",
+	}
+
+	rows := ""
+	for _, n := range notifications {
+		icon := typeIcon[n.Type]
+		if icon == "" {
+			icon = typeIcon["payment_request"]
+		}
+		cls := typeColor[n.Type]
+		if cls == "" {
+			cls = "av-indigo"
+		}
+		date := n.CreatedAt
+		if len(date) >= 10 {
+			date = date[:10]
+		}
+		rows += `
+    <div class="row" style="cursor:pointer;" onclick="dismissNotif('` + n.ID + `','` + n.LinkView + `',this)">
+      <div class="row-avatar ` + cls + `">` + icon + `</div>
+      <div class="row-body">
+        <div class="row-title"><b>` + n.Title + `</b></div>
+        <div class="row-sub">` + n.Body + `</div>
+      </div>
+      <div class="row-right"><div class="row-time">` + date + `</div></div>
+    </div>`
+	}
+
+	emptyBlock := ""
+	if len(notifications) == 0 {
+		emptyBlock = `
+  <div class="empty">
+    <div class="empty-icon success">
+      <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+    </div>
+    <div class="empty-title">All caught up</div>
+    <div class="empty-sub">No new notifications.</div>
+  </div>`
+	}
+
+	clearBtn := ""
+	if len(notifications) > 0 {
+		clearBtn = `<button class="linklike" onclick="clearAllNotifs()">Clear all</button>`
+	}
+
+	return `
+<section class="view" data-view="notifications">
+  <div class="section-row" style="margin-top:0;">
+    <h2 style="font-size:22px; font-weight:800; letter-spacing:-0.02em;">Notifications</h2>
+    ` + clearBtn + `
+  </div>
+  ` + func() string {
+		if len(notifications) > 0 {
+			return `<div class="card" id="notif-list">` + rows + `</div>`
+		}
+		return emptyBlock
+	}() + `
+</section>
+`
+}
+
+// ---------------------------------------------------------------------------
 // PROFILE VIEW
 // ---------------------------------------------------------------------------
 
@@ -1044,6 +1160,21 @@ func requestSheetHTML(friends []*models.Profile) string {
 // ADD FRIEND SHEET  (new)
 // ---------------------------------------------------------------------------
 
+// sessionContextScript embeds the current user's ID and friend set as JS
+// globals so the client-side search can exclude them without a round-trip.
+func sessionContextScript(userID string, friends []*models.Profile) string {
+	safeID := strings.ReplaceAll(userID, `"`, ``)
+	lit := "["
+	for i, f := range friends {
+		if i > 0 {
+			lit += ","
+		}
+		lit += `"` + strings.ReplaceAll(f.ID, `"`, ``) + `"`
+	}
+	lit += "]"
+	return `<script>window._selfID="` + safeID + `";window._friendIDs=new Set(` + lit + `);</script>`
+}
+
 func addFriendSheetHTML() string {
 	return `
 <div class="sheet-backdrop" id="addfriend-sheet" onclick="if(event.target===this) closeSheet('addfriend')">
@@ -1071,6 +1202,8 @@ func dashboardStyles() string {
 	return `
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700&display=swap');
+
+  html { scroll-padding-top: 62px; }
 
   :root {
     --bg: #020617;
@@ -1130,7 +1263,7 @@ func dashboardStyles() string {
     padding: 14px 20px;
   }
   .brand-btn { background: none; border: none; cursor: pointer; padding: 0; }
-  .brand { font-size: 22px; font-weight: 800; letter-spacing: -0.04em; color: var(--text); }
+  .brand { font-size: 38px; font-weight: 800; letter-spacing: -0.04em; color: var(--text); }
   .brand span { color: var(--indigo); }
   .topbar-actions { display: flex; align-items: center; gap: 10px; }
   .icon-btn {
@@ -1659,6 +1792,11 @@ func dashboardStyles() string {
 func dashboardScript() string {
 	return `
 <script>
+  // Prevent the browser from restoring a stale scroll position on refresh,
+  // which would push content up behind the sticky topbar.
+  if (history.scrollRestoration) history.scrollRestoration = 'manual';
+  window.scrollTo(0, 0);
+
   // --- View router --------------------------------------------------------
   function goView(name, subpane) {
     document.querySelectorAll('[data-view]').forEach(function(el) {
@@ -1814,9 +1952,14 @@ func dashboardScript() string {
     q = (q || '').toLowerCase().trim();
     var colors = ['av-indigo','av-amber','av-emerald','av-violet','av-cyan','av-pink'];
     var matches = _allProfiles.filter(function(p) {
+      if (p.id === window._selfID) return false;
+      if (window._friendIDs && window._friendIDs.has(p.id)) return false;
       if (!q) return true;
+      var qDigits = q.replace(/\D/g, '');
+      var phoneDigits = (p.phone_number || '').replace(/\D/g, '');
       return (p.id || '').toLowerCase().indexOf(q) !== -1 ||
-             (p.name || '').toLowerCase().indexOf(q) !== -1;
+             (p.name || '').toLowerCase().indexOf(q) !== -1 ||
+             (qDigits.length >= 3 && phoneDigits.indexOf(qDigits) !== -1);
     }).slice(0, 10);
     if (matches.length === 0) {
       container.innerHTML = '<div style="color:var(--text-mute);font-size:13px;padding:8px 0;">No users found.</div>';
@@ -1864,6 +2007,49 @@ func dashboardScript() string {
       if (res) res.innerHTML = '';
     }
   };
+
+  // --- Notifications ------------------------------------------------------
+  function dismissNotif(notifID, linkView, row) {
+    apiPost('/notifications/seen', { notif_id: notifID },
+      function() {
+        row.style.transition = 'opacity .2s, transform .2s';
+        row.style.opacity = '0';
+        row.style.transform = 'translateX(12px)';
+        setTimeout(function() {
+          row.remove();
+          var list = document.getElementById('notif-list');
+          if (list && list.querySelectorAll('.row').length === 0) {
+            list.outerHTML = '<div class="empty"><div class="empty-icon success"><svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div><div class="empty-title">All caught up</div><div class="empty-sub">No new notifications.</div></div>';
+          }
+          // Update bell badge count
+          var badge = document.querySelector('.icon-btn span[style*="ef4444"]');
+          if (badge) {
+            var cur = parseInt(badge.textContent || '1', 10) - 1;
+            if (cur <= 0) { badge.remove(); }
+            else { badge.textContent = cur; }
+          }
+        }, 200);
+        if (linkView) { goView(linkView); }
+      },
+      function(e) { showToast(e, 'warn'); }
+    );
+  }
+
+  function clearAllNotifs() {
+    apiPost('/notifications/clear', {},
+      function() {
+        var list = document.getElementById('notif-list');
+        if (list) {
+          list.outerHTML = '<div class="empty"><div class="empty-icon success"><svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div><div class="empty-title">All caught up</div><div class="empty-sub">No new notifications.</div></div>';
+        }
+        var badge = document.querySelector('.icon-btn span[style*="ef4444"]');
+        if (badge) badge.remove();
+        document.querySelector('[data-tab="notifications"] span[style*="ef4444"]') && document.querySelector('[data-tab="notifications"] span[style*="ef4444"]').remove();
+        showToast('All notifications cleared');
+      },
+      function(e) { showToast(e, 'warn'); }
+    );
+  }
 
   // --- Accept / Decline friend requests -----------------------------------
   function acceptFriendRequest(requestID, senderID) {
