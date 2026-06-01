@@ -74,6 +74,7 @@ type GroupMember struct {
 }
 
 type GroupInvitation struct {
+	ID         string `json:"id"`
 	GroupID    string `json:"group_id"`
 	SenderID   string `json:"sender_id"`
 	ReceiverID string `json:"receiver_id"`

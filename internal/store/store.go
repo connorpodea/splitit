@@ -13,7 +13,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-func newID() string {
+func create_new_ID() string {
 	b := make([]byte, 12)
 	rand.Read(b)
 	return hex.EncodeToString(b)
@@ -1182,31 +1182,73 @@ func (s *Store) ListGroupMembers(groupID string) ([]models.Profile, error) {
 	return members, nil
 }
 
-func (s *Store) SendGroupInvitation() {
+func (s *Store) SendGroupInvitation(groupID, senderID, receiverID string) error {
+	query := `
+	INSERT INTO group_invitations
+	VALUES (?,?,?,?);`
+
+	invitationID := create_new_ID()
+
+	_, err := s.db.Exec(query, invitationID, groupID, senderID, receiverID)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
-func (s *Store) AcceptGroupInvitation() {
+func (s *Store) AcceptGroupInvitation(invitationID string) error {
+	query := `
+    SELECT group_id, receiver_id
+    FROM group_invitations
+    WHERE id = ?`
+
+	var groupID string
+	var userID string
+
+	err := s.db.QueryRow(query, invitationID).Scan(&groupID, &userID)
+	if err != nil {
+		return err
+	}
+
+	query = `
+    DELETE FROM group_invitations
+    WHERE id = ?`
+
+	_, err = s.db.Exec(query, invitationID)
+	if err != nil {
+		return err
+	}
+
+	query = `
+    INSERT INTO group_members (group_id, member_id)
+    VALUES (?,?)`
+
+	_, err = s.db.Exec(query, groupID, userID)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
-func (s *Store) DeclineGroupInvitation() {
+func (s *Store) DeclineGroupInvitation(invitationID string) error {
 }
 
-func (s *Store) ListIncomingGroupInvitations() {
+func (s *Store) ListIncomingGroupInvitations(receiverID string) ([]models.GroupInvitation, error) {
 }
 
-func (s *Store) ListOutgoingGroupInvitations() {
+func (s *Store) ListOutgoingGroupInvitations(senderID string) ([]models.GroupInvitation, error) {
 }
 
-func (s *Store) LeaveGroup() {
+func (s *Store) LeaveGroup(groupID, userID string) error {
 }
 
-func (s *Store) RemoveGroupMember() {
-
+func (s *Store) RemoveGroupMember(groupID, userID string) error {
 }
 
 func (s *Store) CreateNotification(n *models.Notification) error {
 	if n.ID == "" {
-		n.ID = newID()
+		n.ID = create_new_ID()
 	}
 	_, err := s.db.Exec(
 		`INSERT INTO notifications (id, user_id, type, title, body, link_view) VALUES (?,?,?,?,?,?);`,
