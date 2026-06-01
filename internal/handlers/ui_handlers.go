@@ -23,27 +23,27 @@ func (h *Handler) GetInitialView(w http.ResponseWriter, r *http.Request) {
 	// Dynamic database queries with explicit error recovery fallbacks
 	friends, err := h.store.ListFriends(user.ID)
 	if err != nil {
-		friends = []*models.Profile{}
+		friends = []models.Profile{}
 	}
 	installments, err := h.store.ListInstallments(user.ID)
 	if err != nil {
-		installments = []*models.Installment{}
+		installments = []models.Installment{}
 	}
 	overdueInstallments, err := h.store.ListOverdueInstallments(user.ID)
 	if err != nil {
-		overdueInstallments = []*models.Installment{}
+		overdueInstallments = []models.Installment{}
 	}
 	incomingRequests, err := h.store.ListIncomingPaymentRequests(user.ID)
 	if err != nil {
-		incomingRequests = []*models.PaymentRequest{}
+		incomingRequests = []models.PaymentRequest{}
 	}
 	friendRequests, err := h.store.ListIncomingFriendRequests(user.ID)
 	if err != nil {
-		friendRequests = []*models.FriendRequest{}
+		friendRequests = []models.FriendRequest{}
 	}
 	notifications, err := h.store.ListNotifications(user.ID)
 	if err != nil {
-		notifications = []*models.Notification{}
+		notifications = []models.Notification{}
 	}
 
 	writeHTML(w, dashboardHTML(user, friends, installments, overdueInstallments, incomingRequests, friendRequests, notifications))
@@ -67,27 +67,27 @@ func (h *Handler) GetDashboardView(w http.ResponseWriter, r *http.Request) {
 
 	friends, err := h.store.ListFriends(user.ID)
 	if err != nil {
-		friends = []*models.Profile{}
+		friends = []models.Profile{}
 	}
 	installments, err := h.store.ListInstallments(user.ID)
 	if err != nil {
-		installments = []*models.Installment{}
+		installments = []models.Installment{}
 	}
 	overdueInstallments, err := h.store.ListOverdueInstallments(user.ID)
 	if err != nil {
-		overdueInstallments = []*models.Installment{}
+		overdueInstallments = []models.Installment{}
 	}
 	incomingRequests, err := h.store.ListIncomingPaymentRequests(user.ID)
 	if err != nil {
-		incomingRequests = []*models.PaymentRequest{}
+		incomingRequests = []models.PaymentRequest{}
 	}
 	friendRequests, err := h.store.ListIncomingFriendRequests(user.ID)
 	if err != nil {
-		friendRequests = []*models.FriendRequest{}
+		friendRequests = []models.FriendRequest{}
 	}
 	notifications, err := h.store.ListNotifications(user.ID)
 	if err != nil {
-		notifications = []*models.Notification{}
+		notifications = []models.Notification{}
 	}
 
 	writeHTML(w, dashboardHTML(user, friends, installments, overdueInstallments, incomingRequests, friendRequests, notifications))
@@ -153,7 +153,7 @@ func profileDisplayName(p *models.Profile) string {
 // DASHBOARD SHELL
 // ---------------------------------------------------------------------------
 
-func dashboardHTML(user *models.User, friends []*models.Profile, installments []*models.Installment, overdueInstallments []*models.Installment, incomingRequests []*models.PaymentRequest, friendRequests []*models.FriendRequest, notifications []*models.Notification) string {
+func dashboardHTML(user *models.User, friends []models.Profile, installments []models.Installment, overdueInstallments []models.Installment, incomingRequests []models.PaymentRequest, friendRequests []models.FriendRequest, notifications []models.Notification) string {
 	name := displayName(user)
 	avatar := initials(name)
 	handle := user.ID
@@ -460,7 +460,7 @@ func registerHTML() string {
 // HOME VIEW
 // ---------------------------------------------------------------------------
 
-func viewHome(name string, user *models.User, overdueInstallments []*models.Installment, installments []*models.Installment, incomingRequests []*models.PaymentRequest) string {
+func viewHome(name string, user *models.User, overdueInstallments []models.Installment, installments []models.Installment, incomingRequests []models.PaymentRequest) string {
 	firstName := strings.Fields(name)
 	greet := "there"
 	if len(firstName) > 0 {
@@ -613,7 +613,7 @@ func viewHome(name string, user *models.User, overdueInstallments []*models.Inst
 // ACTIVITY VIEW
 // ---------------------------------------------------------------------------
 
-func viewActivity(installments []*models.Installment, overdueInstallments []*models.Installment, incomingRequests []*models.PaymentRequest) string {
+func viewActivity(installments []models.Installment, overdueInstallments []models.Installment, incomingRequests []models.PaymentRequest) string {
 	// Build overdue ID set for fast lookup.
 	overdueIDs := make(map[string]bool)
 	for _, inst := range overdueInstallments {
@@ -757,7 +757,7 @@ func viewActivity(installments []*models.Installment, overdueInstallments []*mod
 // FRIENDS / SOCIAL VIEW
 // ---------------------------------------------------------------------------
 
-func viewFriends(friends []*models.Profile, friendRequests []*models.FriendRequest) string {
+func viewFriends(friends []models.Profile, friendRequests []models.FriendRequest) string {
 	friendCount := len(friends)
 
 	// --- Incoming friend requests banner ---
@@ -841,11 +841,11 @@ func viewFriends(friends []*models.Profile, friendRequests []*models.FriendReque
 `
 }
 
-func friendsRows(friends []*models.Profile) string {
+func friendsRows(friends []models.Profile) string {
 	out := ""
 	for i, f := range friends {
 		cls := avatarClass(i)
-		dname := profileDisplayName(f)
+		dname := profileDisplayName(&f)
 		ini := initials(dname)
 		if ini == "?" {
 			r := []rune(f.ID)
@@ -880,7 +880,7 @@ func friendsRows(friends []*models.Profile) string {
 // NOTIFICATIONS VIEW
 // ---------------------------------------------------------------------------
 
-func viewNotifications(notifications []*models.Notification) string {
+func viewNotifications(notifications []models.Notification) string {
 	typeIcon := map[string]string{
 		"friend_request":   `<svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>`,
 		"friend_accepted":  `<svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><polyline points="16 11 18 13 22 9"/></svg>`,
@@ -956,7 +956,7 @@ func viewNotifications(notifications []*models.Notification) string {
 // PROFILE VIEW
 // ---------------------------------------------------------------------------
 
-func viewProfile(user *models.User, avatar, name, handle, email, phone string, friends []*models.Profile, installments []*models.Installment) string {
+func viewProfile(user *models.User, avatar, name, handle, email, phone string, friends []models.Profile, installments []models.Installment) string {
 	score := user.CreditScore
 	scoreLabel := creditScoreLabel(score)
 	scoreWidth := fmt.Sprintf("%d%%", score)
@@ -1041,10 +1041,10 @@ func viewProfile(user *models.User, avatar, name, handle, email, phone string, f
 // PAY SHEET  (dynamic friend dropdowns + real credit display)
 // ---------------------------------------------------------------------------
 
-func paySheetHTML(friends []*models.Profile, availableCredit float64) string {
+func paySheetHTML(friends []models.Profile, availableCredit float64) string {
 	friendOpts := `<option value="">Select a friend…</option>`
 	for _, f := range friends {
-		dname := profileDisplayName(f)
+		dname := profileDisplayName(&f)
 		friendOpts += `<option value="` + f.ID + `">` + dname + ` · @` + f.ID + `</option>`
 	}
 
@@ -1117,10 +1117,10 @@ func paySheetHTML(friends []*models.Profile, availableCredit float64) string {
 // REQUEST SHEET  (dynamic friend dropdowns)
 // ---------------------------------------------------------------------------
 
-func requestSheetHTML(friends []*models.Profile) string {
+func requestSheetHTML(friends []models.Profile) string {
 	friendOpts := `<option value="">Select a friend…</option>`
 	for _, f := range friends {
-		dname := profileDisplayName(f)
+		dname := profileDisplayName(&f)
 		friendOpts += `<option value="` + f.ID + `">` + dname + ` · @` + f.ID + `</option>`
 	}
 
@@ -1162,7 +1162,7 @@ func requestSheetHTML(friends []*models.Profile) string {
 
 // sessionContextScript embeds the current user's ID and friend set as JS
 // globals so the client-side search can exclude them without a round-trip.
-func sessionContextScript(userID string, friends []*models.Profile) string {
+func sessionContextScript(userID string, friends []models.Profile) string {
 	safeID := strings.ReplaceAll(userID, `"`, ``)
 	lit := "["
 	for i, f := range friends {

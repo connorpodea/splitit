@@ -280,7 +280,7 @@ func (s *Store) GetProfile(id string) (*models.Profile, error) {
 	return &profile, nil
 }
 
-func (s *Store) ListUsers() ([]*models.User, error) {
+func (s *Store) ListUsers() ([]models.User, error) {
 	query := `
 	SELECT id, name, email, phone_number, balance, credit_score, credit_limit, created_at 
 	FROM users;`
@@ -291,7 +291,7 @@ func (s *Store) ListUsers() ([]*models.User, error) {
 	}
 	defer rows.Close()
 
-	var users []*models.User
+	users := []models.User{}
 
 	for rows.Next() {
 		var u models.User
@@ -301,7 +301,7 @@ func (s *Store) ListUsers() ([]*models.User, error) {
 			return nil, fmt.Errorf("failed to scan row into user data struct during list aggregation: %w", err)
 		}
 
-		users = append(users, &u)
+		users = append(users, u)
 	}
 	// Check for errors encountered during iteration
 	if err = rows.Err(); err != nil {
@@ -310,7 +310,7 @@ func (s *Store) ListUsers() ([]*models.User, error) {
 	return users, nil
 }
 
-func (s *Store) ListProfiles() ([]*models.Profile, error) {
+func (s *Store) ListProfiles() ([]models.Profile, error) {
 	query := `
 	SELECT id, name, email, phone_number, created_at
 	FROM users;`
@@ -321,7 +321,7 @@ func (s *Store) ListProfiles() ([]*models.Profile, error) {
 	}
 	defer rows.Close()
 
-	var profiles []*models.Profile
+	profiles := []models.Profile{}
 
 	for rows.Next() {
 		var profile models.Profile
@@ -331,7 +331,7 @@ func (s *Store) ListProfiles() ([]*models.Profile, error) {
 			return nil, fmt.Errorf("failed to scan matching profile data mapping structure: %w", err)
 		}
 
-		profiles = append(profiles, &profile)
+		profiles = append(profiles, profile)
 	}
 	// Check for errors encountered during iteration
 	if err = rows.Err(); err != nil {
@@ -445,7 +445,7 @@ func (s *Store) CreatePaymentRequest(request *models.PaymentRequest) error {
 	return nil
 }
 
-func (s *Store) ListIncomingPaymentRequests(userID string) ([]*models.PaymentRequest, error) {
+func (s *Store) ListIncomingPaymentRequests(userID string) ([]models.PaymentRequest, error) {
 	query := `
 	SELECT id, requester_id, payer_id, amount, note, status, created_at
 	FROM payment_requests
@@ -457,7 +457,7 @@ func (s *Store) ListIncomingPaymentRequests(userID string) ([]*models.PaymentReq
 	}
 	defer rows.Close()
 
-	var requests []*models.PaymentRequest
+	requests := []models.PaymentRequest{}
 
 	for rows.Next() {
 		var r models.PaymentRequest
@@ -466,7 +466,7 @@ func (s *Store) ListIncomingPaymentRequests(userID string) ([]*models.PaymentReq
 		if err != nil {
 			return nil, fmt.Errorf("failed to unpack invoice variables into internal payment request structure array: %w", err)
 		}
-		requests = append(requests, &r)
+		requests = append(requests, r)
 	}
 
 	// Check for errors encountered during iteration
@@ -476,7 +476,7 @@ func (s *Store) ListIncomingPaymentRequests(userID string) ([]*models.PaymentReq
 	return requests, nil
 }
 
-func (s *Store) ListOutgoingPaymentRequests(userID string) ([]*models.PaymentRequest, error) {
+func (s *Store) ListOutgoingPaymentRequests(userID string) ([]models.PaymentRequest, error) {
 	query := `
 	SELECT id, requester_id, payer_id, amount, note, status, created_at
 	FROM payment_requests
@@ -488,7 +488,7 @@ func (s *Store) ListOutgoingPaymentRequests(userID string) ([]*models.PaymentReq
 	}
 	defer rows.Close()
 
-	var requests []*models.PaymentRequest
+	requests := []models.PaymentRequest{}
 
 	for rows.Next() {
 		var r models.PaymentRequest
@@ -498,7 +498,7 @@ func (s *Store) ListOutgoingPaymentRequests(userID string) ([]*models.PaymentReq
 			return nil, fmt.Errorf("failed to map outbound record fields safely to target collection model fields: %w", err)
 		}
 
-		requests = append(requests, &r)
+		requests = append(requests, r)
 	}
 
 	// Check for errors encountered during iteration
@@ -597,7 +597,7 @@ func (s *Store) CreateBNPLLoan(payment *models.Payment) error {
 	}
 
 	// Step 3: Collect the Down Payment — pull the first installment from the buyer back to the app treasury
-	downPayment := &models.Payment{
+	down_payment := &models.Payment{
 		ID:                fmt.Sprintf("down_%s", payment.ID),
 		SenderID:          payment.SenderID,
 		ReceiverID:        "app_treasury",
@@ -609,13 +609,13 @@ func (s *Store) CreateBNPLLoan(payment *models.Payment) error {
 		Note:              fmt.Sprintf("Down payment for loan %s", payment.ID),
 	}
 
-	err = s.Pay(downPayment)
+	err = s.Pay(down_payment)
 	if err != nil {
 		return fmt.Errorf("loan processing aborted: down payment collection extraction failed for buyer ID '%s': %w", payment.SenderID, err)
 	}
 
 	// Step 4: Generate Installment Calendars — build the remaining debt schedule into the installments table
-	currentTime := time.Now()
+	current_time := time.Now()
 
 	for i := uint8(1); i <= payment.TotalInstallments; i++ {
 		var installmentAmount float64
@@ -626,12 +626,12 @@ func (s *Store) CreateBNPLLoan(payment *models.Payment) error {
 			// Installment 1 is paid upfront during s.Pay(downPayment)
 			installmentAmount = baseAmount + remainder
 			isPaid = true
-			dueDate = currentTime
+			dueDate = current_time
 		} else {
 			installmentAmount = baseAmount
 			isPaid = false
 			// Stagger deadlines by 7 days multiplied by the installment index
-			dueDate = currentTime.AddDate(0, 0, int(i-1)*7)
+			dueDate = current_time.AddDate(0, 0, int(i-1)*7)
 		}
 
 		// Generate a structured identifier for each installment row
@@ -654,13 +654,13 @@ func (s *Store) CreateBNPLLoan(payment *models.Payment) error {
 	return nil
 }
 
-func (s *Store) CalculateFeeRate(creditScore uint8) float64 {
+func (s *Store) CalculateFeeRate(credit_score uint8) float64 {
 	switch {
-	case creditScore >= 90:
+	case credit_score >= 90:
 		return 0.01
-	case creditScore >= 75:
+	case credit_score >= 75:
 		return 0.02
-	case creditScore >= 50:
+	case credit_score >= 50:
 		return 0.03
 	default:
 		return 0.07
@@ -823,7 +823,7 @@ func (s *Store) PayInstallment(installmentID, paymentID, userID string, amount f
 	return nil
 }
 
-func (s *Store) ListInstallments(userID string) ([]*models.Installment, error) {
+func (s *Store) ListInstallments(userID string) ([]models.Installment, error) {
 	query := `
 	SELECT id, payment_id, user_id, amount, due_date, is_paid, created_at
 	FROM installments
@@ -836,7 +836,7 @@ func (s *Store) ListInstallments(userID string) ([]*models.Installment, error) {
 	}
 	defer rows.Close()
 
-	var installments []*models.Installment
+	installments := []models.Installment{}
 
 	for rows.Next() {
 		var installment models.Installment
@@ -849,7 +849,7 @@ func (s *Store) ListInstallments(userID string) ([]*models.Installment, error) {
 
 		// Convert the SELite integer flag back to a Go boolean
 		installment.IsPaid = is_paid_int == 1
-		installments = append(installments, &installment)
+		installments = append(installments, installment)
 	}
 
 	// Check for errors encountered during iteration
@@ -859,7 +859,7 @@ func (s *Store) ListInstallments(userID string) ([]*models.Installment, error) {
 	return installments, nil
 }
 
-func (s *Store) ListOverdueInstallments(userID string) ([]*models.Installment, error) {
+func (s *Store) ListOverdueInstallments(userID string) ([]models.Installment, error) {
 	query := `
 	SELECT id, payment_id, user_id, amount, due_date, is_paid, created_at
 	FROM installments
@@ -873,7 +873,7 @@ func (s *Store) ListOverdueInstallments(userID string) ([]*models.Installment, e
 	}
 	defer rows.Close()
 
-	var installments []*models.Installment
+	installments := []models.Installment{}
 
 	for rows.Next() {
 		var installment models.Installment
@@ -886,7 +886,7 @@ func (s *Store) ListOverdueInstallments(userID string) ([]*models.Installment, e
 
 		// Convert the SELite integer flag back to a Go boolean
 		installment.IsPaid = is_paid_int == 1
-		installments = append(installments, &installment)
+		installments = append(installments, installment)
 	}
 
 	// Check for errors encountered during iteration
@@ -916,7 +916,7 @@ func (s *Store) SendFriendRequest(request *models.FriendRequest) error {
 	return nil
 }
 
-func (s *Store) ListIncomingFriendRequests(userID string) ([]*models.FriendRequest, error) {
+func (s *Store) ListIncomingFriendRequests(userID string) ([]models.FriendRequest, error) {
 	query := `
 	SELECT id, sender_id, receiver_id, created_at
 	FROM friend_requests
@@ -929,7 +929,7 @@ func (s *Store) ListIncomingFriendRequests(userID string) ([]*models.FriendReque
 	defer rows.Close()
 
 	// collect a list of all the requests
-	var requests []*models.FriendRequest
+	requests := []models.FriendRequest{}
 	for rows.Next() {
 		var r models.FriendRequest
 
@@ -937,7 +937,7 @@ func (s *Store) ListIncomingFriendRequests(userID string) ([]*models.FriendReque
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse incoming connection record sequence into target friend request model: %w", err)
 		}
-		requests = append(requests, &r)
+		requests = append(requests, r)
 	}
 
 	// Check for errors encountered during iteration
@@ -947,7 +947,7 @@ func (s *Store) ListIncomingFriendRequests(userID string) ([]*models.FriendReque
 	return requests, nil
 }
 
-func (s *Store) ListOutgoingFriendRequests(userID string) ([]*models.FriendRequest, error) {
+func (s *Store) ListOutgoingFriendRequests(userID string) ([]models.FriendRequest, error) {
 	query := `
 	SELECT id, sender_id, receiver_id, created_at
 	FROM friend_requests
@@ -959,7 +959,7 @@ func (s *Store) ListOutgoingFriendRequests(userID string) ([]*models.FriendReque
 	}
 	defer rows.Close()
 
-	var requests []*models.FriendRequest
+	requests := []models.FriendRequest{}
 
 	for rows.Next() {
 		var r models.FriendRequest
@@ -968,7 +968,7 @@ func (s *Store) ListOutgoingFriendRequests(userID string) ([]*models.FriendReque
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan matching outbound invitation row properties into model reference: %w", err)
 		}
-		requests = append(requests, &r)
+		requests = append(requests, r)
 	}
 
 	// Check for errors encountered during iteration
@@ -1044,13 +1044,13 @@ func (s *Store) RemoveFriendMutual(userID, friendID string) error {
 	return nil
 }
 
-func (s *Store) ListFriends(userID string) ([]*models.Profile, error) {
+func (s *Store) ListFriends(userID string) ([]models.Profile, error) {
 	// Look up all friends of the current user and use the friends' IDs to return their profile
 	query := `
-	SELECT u.id, u.name, u.email, u.phone_number, u.created_at
-	FROM friends AS fr
-	JOIN users AS u ON fr.friend_id = u.id
-	WHERE fr.user_id = ?;`
+	SELECT users.id, users.name, users.email, users.phone_number, users.created_at
+	FROM friends
+	JOIN users ON friends.friend_id = users.id
+	WHERE friends.user_id = ?;`
 
 	rows, err := s.db.Query(query, userID)
 	if err != nil {
@@ -1058,7 +1058,7 @@ func (s *Store) ListFriends(userID string) ([]*models.Profile, error) {
 	}
 	defer rows.Close()
 
-	var friends []*models.Profile
+	friends := []models.Profile{}
 
 	for rows.Next() {
 		var friend models.Profile
@@ -1067,7 +1067,7 @@ func (s *Store) ListFriends(userID string) ([]*models.Profile, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to deserialize user profile attributes from friends table query data stream: %w", err)
 		}
-		friends = append(friends, &friend)
+		friends = append(friends, friend)
 	}
 
 	// Check for errors encountered during iteration
@@ -1079,14 +1079,107 @@ func (s *Store) ListFriends(userID string) ([]*models.Profile, error) {
 
 // NEW FEATURE : GROUPS
 
-func (s *Store) CreateGroup(new_group *models.Group) {
-	query := 
+// CreateGroup registers a new group entity and instantly binds the creator to the roster table.
+func (s *Store) CreateGroup(group *models.Group) error {
+	// 1. Begin a database transaction to ensure both writes succeed or both fail
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin group creation transaction: %w", err)
+	}
+	// Defer a rollback. If the function returns early due to an error, tx.Rollback() clears the queue.
+	// If tx.Commit() is called successfully, the rollback becomes a no-op.
+	defer tx.Rollback()
+
+	// 2. Insert the top-level group profile row
+	groupQuery := `
+	INSERT INTO groups (id, name, creator_id, created_at)
+	VALUES (?, ?, ?, ?);`
+
+	_, err = tx.Exec(groupQuery, group.ID, group.Name, group.CreatorID, group.CreatedAt)
+	if err != nil {
+		return fmt.Errorf("failed to insert group metadata record: %w", err)
+	}
+
+	// 3. Immediately insert the creator into the group_members junction table
+	memberQuery := `
+	INSERT INTO group_members (group_id, member_id, joined_at)
+	VALUES (?, ?, ?);`
+
+	_, err = tx.Exec(memberQuery, group.ID, group.CreatorID, group.CreatedAt)
+	if err != nil {
+		return fmt.Errorf("failed to bind group creator to the membership table: %w", err)
+	}
+
+	// 4. If both executions cleared, commit the transaction permanently to the disk asset file
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit group transaction to database file: %w", err)
+	}
+
+	return nil
 }
 
-func (s *Store) ListGroups() {
+// ListGroups queries the database to discover every group relationship mapped to a single user context.
+func (s *Store) ListGroups(userID string) ([]models.Group, error) {
+	query := `
+	SELECT groups.id, groups.name, groups.creator_id, groups.created_at
+	FROM groups
+	JOIN group_members ON groups.id = group_members.group_id
+	WHERE group_members.member_id = ?;`
+
+	rows, err := s.db.Query(query, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query user group collection matrices: %w", err)
+	}
+	defer rows.Close()
+
+	list := []models.Group{}
+
+	for rows.Next() {
+		var g models.Group
+		err = rows.Scan(&g.ID, &g.Name, &g.CreatorID, &g.CreatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan database group row into model properties: %w", err)
+		}
+		list = append(list, g)
+	}
+
+	// Check for any errors encountered during row iteration
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("error encountered during group record row scanning loops: %w", err)
+	}
+
+	return list, nil
 }
 
-func (s *Store) ListGroupMembers() {
+func (s *Store) ListGroupMembers(groupID string) ([]models.Profile, error) {
+	query := `
+	SELECT users.id, users.name, users.email, users.phone_number, users.created_at
+	FROM users
+	JOIN group_members ON group_members.member_id = users.id
+	WHERE group_members.group_id = ?;`
+
+	rows, err := s.db.Query(query, groupID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	members := []models.Profile{}
+
+	for rows.Next() {
+		var m models.Profile
+
+		err = rows.Scan(&m.ID, &m.Name, &m.Email, &m.PhoneNumber, &m.CreatedAt)
+		if err != nil {
+			return nil, err
+		}
+		members = append(members, m)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	return members, nil
 }
 
 func (s *Store) SendGroupInvitation() {
@@ -1122,7 +1215,7 @@ func (s *Store) CreateNotification(n *models.Notification) error {
 	return err
 }
 
-func (s *Store) ListNotifications(userID string) ([]*models.Notification, error) {
+func (s *Store) ListNotifications(userID string) ([]models.Notification, error) {
 	rows, err := s.db.Query(
 		`SELECT id, user_id, type, title, body, link_view, is_seen, created_at
 		 FROM notifications WHERE user_id = ? AND is_seen = 0
@@ -1134,7 +1227,7 @@ func (s *Store) ListNotifications(userID string) ([]*models.Notification, error)
 	}
 	defer rows.Close()
 
-	var notifs []*models.Notification
+	notifs := []models.Notification{}
 	for rows.Next() {
 		var n models.Notification
 		var isSeen int
@@ -1142,7 +1235,7 @@ func (s *Store) ListNotifications(userID string) ([]*models.Notification, error)
 			return nil, err
 		}
 		n.IsSeen = isSeen == 1
-		notifs = append(notifs, &n)
+		notifs = append(notifs, n)
 	}
 	return notifs, rows.Err()
 }
