@@ -555,22 +555,19 @@ func (h *Handler) AcceptFriendRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Initialize a custom, empty struct to hold the incoming data
 	type Input struct {
 		RequestID string `json:"request_id"`
-		SenderID  string `json:"sender_id"`
 	}
 	var input Input
 
-	// Read the JSON text out of the web request body and decode it into the Go struct
 	err := json.NewDecoder(r.Body).Decode(&input)
-	if err != nil {
+	if err != nil || input.RequestID == "" {
 		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON request payload formatting"})
 		return
 	}
 
-	// Pass the populated struct parameters explicitly matching against receiver session cookie references
-	err = h.store.AcceptFriendRequest(input.RequestID, input.SenderID, receiverID)
+	// senderID is derived inside the store from the database — not trusted from the client
+	err = h.store.AcceptFriendRequest(input.RequestID, receiverID)
 	if err != nil {
 		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return

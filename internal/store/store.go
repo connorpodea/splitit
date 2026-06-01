@@ -53,15 +53,15 @@ func (s *Store) createTables() error {
 	// users table
 	query := `
 	CREATE TABLE IF NOT EXISTS users (
-		id TEXT PRIMARY KEY,
-		password_hash TEXT,
-		name TEXT,
-		email TEXT,
-		phone_number TEXT,
-		balance REAL,
-		credit_score INTEGER DEFAULT 50,
-		credit_limit REAL DEFAULT 1000.00,
-		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		id            TEXT    PRIMARY KEY,
+		password_hash TEXT    NOT NULL,
+		name          TEXT    NOT NULL,
+		email         TEXT    NOT NULL,
+		phone_number  TEXT    NOT NULL,
+		balance       REAL    NOT NULL,
+		credit_score  INTEGER NOT NULL DEFAULT 50,
+		credit_limit  REAL    NOT NULL DEFAULT 1000.00,
+		created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 	);`
 
 	_, err := s.db.Exec(query)
@@ -70,20 +70,21 @@ func (s *Store) createTables() error {
 	}
 
 	// payments table
-	// FOREIGN KEY's ensure both user objects are found in users table
+	// FOREIGN KEY's ensure both user objects are found in the users table
+	// note is intentionally nullable — it is an optional field
 	query = `
 	CREATE TABLE IF NOT EXISTS payments (
-		id TEXT PRIMARY KEY,
-		sender_id TEXT,
-		receiver_id TEXT,
-		amount REAL,
-		total_amount REAL,
-		note TEXT,
-		payment_type TEXT,
-		total_installments INTEGER,
-		status TEXT,
-		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-		FOREIGN KEY (sender_id) REFERENCES users (id),
+		id                 TEXT    PRIMARY KEY,
+		sender_id          TEXT    NOT NULL,
+		receiver_id        TEXT    NOT NULL,
+		amount             REAL    NOT NULL,
+		total_amount       REAL    NOT NULL,
+		note               TEXT,
+		payment_type       TEXT    NOT NULL,
+		total_installments INTEGER NOT NULL,
+		status             TEXT    NOT NULL,
+		created_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (sender_id)   REFERENCES users (id),
 		FOREIGN KEY (receiver_id) REFERENCES users (id)
 	);`
 
@@ -93,16 +94,18 @@ func (s *Store) createTables() error {
 	}
 
 	// payment_requests table
-	query = `CREATE TABLE IF NOT EXISTS payment_requests (
-		id TEXT PRIMARY KEY,
-		requester_id TEXT,
-		payer_id TEXT,
-		amount REAL,
-		note TEXT,
-		status TEXT,
-		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+	// note is intentionally nullable — it is an optional field
+	query = `
+	CREATE TABLE IF NOT EXISTS payment_requests (
+		id           TEXT    PRIMARY KEY,
+		requester_id TEXT    NOT NULL,
+		payer_id     TEXT    NOT NULL,
+		amount       REAL    NOT NULL,
+		note         TEXT,
+		status       TEXT    NOT NULL,
+		created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		FOREIGN KEY (requester_id) REFERENCES users (id),
-		FOREIGN KEY (payer_id) REFERENCES users (id)
+		FOREIGN KEY (payer_id)     REFERENCES users (id)
 	);`
 
 	_, err = s.db.Exec(query)
@@ -111,18 +114,18 @@ func (s *Store) createTables() error {
 	}
 
 	// installments table
-	// FOREIGN KEY's ensure the payment exists in the payments table and the user exists in the user table
+	// FOREIGN KEY's ensure the payment exists in the payments table and the user exists in the users table
 	query = `
 	CREATE TABLE IF NOT EXISTS installments (
-		id TEXT PRIMARY KEY,
-		payment_id TEXT,
-		user_id TEXT,
-		amount REAL,
-		due_date TEXT,
-		is_paid INTEGER DEFAULT 0,
-		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		id         TEXT    PRIMARY KEY,
+		payment_id TEXT    NOT NULL,
+		user_id    TEXT    NOT NULL,
+		amount     REAL    NOT NULL,
+		due_date   TEXT    NOT NULL,
+		is_paid    INTEGER NOT NULL DEFAULT 0,
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		FOREIGN KEY (payment_id) REFERENCES payments (id),
-		FOREIGN KEY (user_id) REFERENCES users (id)
+		FOREIGN KEY (user_id)    REFERENCES users (id)
 	);`
 
 	_, err = s.db.Exec(query)
@@ -131,16 +134,16 @@ func (s *Store) createTables() error {
 	}
 
 	// friends table
-	// FOREIGN KEY's ensure that the users exist within the database
+	// FOREIGN KEY's ensure that both users exist within the database
 	// PRIMARY KEY ensures that friendships cannot duplicate
 	query = `
 	CREATE TABLE IF NOT EXISTS friends (
-		user_id TEXT,
-		friend_id TEXT,
-		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		user_id    TEXT     NOT NULL,
+		friend_id  TEXT     NOT NULL,
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		PRIMARY KEY (user_id, friend_id),
-		FOREIGN KEY (user_id) references users (id),
-		FOREIGN KEY (friend_id) references users (id)
+		FOREIGN KEY (user_id)   REFERENCES users (id),
+		FOREIGN KEY (friend_id) REFERENCES users (id)
 	);`
 
 	_, err = s.db.Exec(query)
@@ -149,14 +152,14 @@ func (s *Store) createTables() error {
 	}
 
 	// friend requests table
-	// FOREIGN KEY's ensure that the users exist within the database
+	// FOREIGN KEY's ensure that both users exist within the database
 	query = `
 	CREATE TABLE IF NOT EXISTS friend_requests (
-		id TEXT PRIMARY KEY,
-		sender_id TEXT,
-		receiver_id TEXT,
-		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-		FOREIGN KEY (sender_id) REFERENCES users (id),
+		id          TEXT     PRIMARY KEY,
+		sender_id   TEXT     NOT NULL,
+		receiver_id TEXT     NOT NULL,
+		created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (sender_id)   REFERENCES users (id),
 		FOREIGN KEY (receiver_id) REFERENCES users (id)
 	);`
 
@@ -168,14 +171,14 @@ func (s *Store) createTables() error {
 	// notifications table
 	query = `
 	CREATE TABLE IF NOT EXISTS notifications (
-		id TEXT PRIMARY KEY,
-		user_id TEXT,
-		type TEXT,
-		title TEXT,
-		body TEXT,
-		link_view TEXT,
-		is_seen INTEGER DEFAULT 0,
-		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		id         TEXT     PRIMARY KEY,
+		user_id    TEXT     NOT NULL,
+		type       TEXT     NOT NULL,
+		title      TEXT     NOT NULL,
+		body       TEXT     NOT NULL,
+		link_view  TEXT     NOT NULL,
+		is_seen    INTEGER  NOT NULL DEFAULT 0,
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		FOREIGN KEY (user_id) REFERENCES users (id)
 	);`
 
@@ -187,10 +190,10 @@ func (s *Store) createTables() error {
 	// groups table
 	query = `
 	CREATE TABLE IF NOT EXISTS groups (
-		id TEXT PRIMARY KEY,
-		name TEXT,
-		creator_id TEXT,
-		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		id         TEXT     PRIMARY KEY,
+		name       TEXT     NOT NULL,
+		creator_id TEXT     NOT NULL,
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		FOREIGN KEY (creator_id) REFERENCES users (id)
 	);`
 
@@ -200,13 +203,14 @@ func (s *Store) createTables() error {
 	}
 
 	// group members table
+	// PRIMARY KEY ensures a user cannot appear in the same group twice
 	query = `
 	CREATE TABLE IF NOT EXISTS group_members (
-		group_id TEXT,
-		member_id TEXT,
-		joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		group_id   TEXT     NOT NULL,
+		member_id  TEXT     NOT NULL,
+		joined_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		PRIMARY KEY (group_id, member_id),
-		FOREIGN KEY (group_id) REFERENCES groups (id),
+		FOREIGN KEY (group_id)  REFERENCES groups (id),
 		FOREIGN KEY (member_id) REFERENCES users (id)
 	);`
 
@@ -215,19 +219,19 @@ func (s *Store) createTables() error {
 		return err
 	}
 
-	// group invitations table
+	// group invitations table — no status column; accepted invitations create a membership row,
+	// declined invitations simply delete the row (mirrors the friend_requests pattern)
 	query = `
-    CREATE TABLE IF NOT EXISTS group_invitations (
-        id TEXT PRIMARY KEY,
-        group_id TEXT NOT NULL,
-        sender_id TEXT NOT NULL,
-        receiver_id TEXT NOT NULL,
-        status TEXT NOT NULL DEFAULT 'pending',
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (group_id) REFERENCES groups (id),
-        FOREIGN KEY (sender_id) REFERENCES users (id),
-        FOREIGN KEY (receiver_id) REFERENCES users (id)
-    );`
+	CREATE TABLE IF NOT EXISTS group_invitations (
+		id          TEXT     PRIMARY KEY,
+		group_id    TEXT     NOT NULL,
+		sender_id   TEXT     NOT NULL,
+		receiver_id TEXT     NOT NULL,
+		created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (group_id)    REFERENCES groups (id),
+		FOREIGN KEY (sender_id)   REFERENCES users (id),
+		FOREIGN KEY (receiver_id) REFERENCES users (id)
+	);`
 
 	_, err = s.db.Exec(query)
 	if err != nil {
@@ -341,6 +345,11 @@ func (s *Store) ListProfiles() ([]models.Profile, error) {
 }
 
 func (s *Store) Pay(payment *models.Payment) error {
+	// Generate a unique transaction identifier inside the store so the client never controls primary keys
+	if payment.ID == "" {
+		payment.ID = create_new_ID()
+	}
+
 	transaction, err := s.db.Begin()
 	if err != nil {
 		return fmt.Errorf("ledger settlement aborted: failed to open transaction session context: %w", err)
@@ -349,18 +358,18 @@ func (s *Store) Pay(payment *models.Payment) error {
 	defer transaction.Rollback()
 
 	// Block the sender from going into negative balance
-	var current_balance float64
-	balance_query := `
-	SELECT balance 
-	FROM users 
+	var currentBalance float64
+	balanceQuery := `
+	SELECT balance
+	FROM users
 	WHERE id = ?;`
-	err = transaction.QueryRow(balance_query, payment.SenderID).Scan(&current_balance)
+	err = transaction.QueryRow(balanceQuery, payment.SenderID).Scan(&currentBalance)
 	if err != nil {
 		return fmt.Errorf("ledger settlement failed: unable to verify sender funds: %w", err)
 	}
 
-	if current_balance < payment.Amount {
-		return fmt.Errorf("ledger settlement rejected: insufficient liquid funds (ID: '%s' attempted to pay $%.2f but only has $%.2f)", payment.SenderID, payment.Amount, current_balance)
+	if currentBalance < payment.Amount {
+		return fmt.Errorf("ledger settlement rejected: insufficient liquid funds (ID: '%s' attempted to pay $%.2f but only has $%.2f)", payment.SenderID, payment.Amount, currentBalance)
 	}
 
 	// Update the senders balance to deduct the upfront payment
@@ -426,6 +435,11 @@ func (s *Store) GetPayment(paymentID string) (*models.Payment, error) {
 }
 
 func (s *Store) CreatePaymentRequest(request *models.PaymentRequest) error {
+	// Generate a unique request identifier inside the store so the client never controls primary keys
+	if request.ID == "" {
+		request.ID = create_new_ID()
+	}
+
 	query := `
 	INSERT INTO payment_requests
 	(id, requester_id, payer_id, amount, note, status)
@@ -508,15 +522,15 @@ func (s *Store) ListOutgoingPaymentRequests(userID string) ([]models.PaymentRequ
 	return requests, nil
 }
 
-func (s *Store) UpdatePaymentRequestStatus(paymentID, new_status string) error {
+func (s *Store) UpdatePaymentRequestStatus(paymentID, newStatus string) error {
 	query := `
 	UPDATE payment_requests
 	SET status = ?
 	WHERE id = ?;`
 
-	_, err := s.db.Exec(query, new_status, paymentID)
+	_, err := s.db.Exec(query, newStatus, paymentID)
 	if err != nil {
-		return fmt.Errorf("state machine error: failed to transition payment invoice request ID '%s' to state token '%s': %w", paymentID, new_status, err)
+		return fmt.Errorf("state machine error: failed to transition payment invoice request ID '%s' to state token '%s': %w", paymentID, newStatus, err)
 	}
 	return nil
 }
@@ -524,6 +538,11 @@ func (s *Store) UpdatePaymentRequestStatus(paymentID, new_status string) error {
 func (s *Store) CreateBNPLLoan(payment *models.Payment) error {
 	if payment.TotalInstallments == 0 {
 		return fmt.Errorf("credit engine processing aborted: total plan financing installments cannot be evaluated at zero")
+	}
+
+	// Generate the master loan ID in the store
+	if payment.ID == "" {
+		payment.ID = create_new_ID()
 	}
 
 	// Reject the loan if the requested amount exceeds the buyer's available credit limit
@@ -597,7 +616,7 @@ func (s *Store) CreateBNPLLoan(payment *models.Payment) error {
 	}
 
 	// Step 3: Collect the Down Payment — pull the first installment from the buyer back to the app treasury
-	down_payment := &models.Payment{
+	downPayment := &models.Payment{
 		ID:                fmt.Sprintf("down_%s", payment.ID),
 		SenderID:          payment.SenderID,
 		ReceiverID:        "app_treasury",
@@ -609,13 +628,13 @@ func (s *Store) CreateBNPLLoan(payment *models.Payment) error {
 		Note:              fmt.Sprintf("Down payment for loan %s", payment.ID),
 	}
 
-	err = s.Pay(down_payment)
+	err = s.Pay(downPayment)
 	if err != nil {
 		return fmt.Errorf("loan processing aborted: down payment collection extraction failed for buyer ID '%s': %w", payment.SenderID, err)
 	}
 
 	// Step 4: Generate Installment Calendars — build the remaining debt schedule into the installments table
-	current_time := time.Now()
+	currentTime := time.Now()
 
 	for i := uint8(1); i <= payment.TotalInstallments; i++ {
 		var installmentAmount float64
@@ -626,12 +645,12 @@ func (s *Store) CreateBNPLLoan(payment *models.Payment) error {
 			// Installment 1 is paid upfront during s.Pay(downPayment)
 			installmentAmount = baseAmount + remainder
 			isPaid = true
-			dueDate = current_time
+			dueDate = currentTime
 		} else {
 			installmentAmount = baseAmount
 			isPaid = false
 			// Stagger deadlines by 7 days multiplied by the installment index
-			dueDate = current_time.AddDate(0, 0, int(i-1)*7)
+			dueDate = currentTime.AddDate(0, 0, int(i-1)*7)
 		}
 
 		// Generate a structured identifier for each installment row
@@ -654,13 +673,14 @@ func (s *Store) CreateBNPLLoan(payment *models.Payment) error {
 	return nil
 }
 
-func (s *Store) CalculateFeeRate(credit_score uint8) float64 {
+func (s *Store) CalculateFeeRate(creditScore uint8) float64 {
+	// Returns a fee multiplier based on the buyer's credit health score
 	switch {
-	case credit_score >= 90:
+	case creditScore >= 90:
 		return 0.01
-	case credit_score >= 75:
+	case creditScore >= 75:
 		return 0.02
-	case credit_score >= 50:
+	case creditScore >= 50:
 		return 0.03
 	default:
 		return 0.07
@@ -840,15 +860,15 @@ func (s *Store) ListInstallments(userID string) ([]models.Installment, error) {
 
 	for rows.Next() {
 		var installment models.Installment
-		var is_paid_int int
+		var isPaidInt int
 
-		err = rows.Scan(&installment.ID, &installment.PaymentID, &installment.UserWithDebt, &installment.Amount, &installment.DueDate, &is_paid_int, &installment.CreatedAt)
+		err = rows.Scan(&installment.ID, &installment.PaymentID, &installment.UserWithDebt, &installment.Amount, &installment.DueDate, &isPaidInt, &installment.CreatedAt)
 		if err != nil {
 			return nil, fmt.Errorf("failed to deserialize installment row into debt schedule model structure: %w", err)
 		}
 
 		// Convert the SELite integer flag back to a Go boolean
-		installment.IsPaid = is_paid_int == 1
+		installment.IsPaid = isPaidInt == 1
 		installments = append(installments, installment)
 	}
 
@@ -877,15 +897,15 @@ func (s *Store) ListOverdueInstallments(userID string) ([]models.Installment, er
 
 	for rows.Next() {
 		var installment models.Installment
-		var is_paid_int int
+		var isPaidInt int
 
-		err = rows.Scan(&installment.ID, &installment.PaymentID, &installment.UserWithDebt, &installment.Amount, &installment.DueDate, &is_paid_int, &installment.CreatedAt)
+		err = rows.Scan(&installment.ID, &installment.PaymentID, &installment.UserWithDebt, &installment.Amount, &installment.DueDate, &isPaidInt, &installment.CreatedAt)
 		if err != nil {
 			return nil, fmt.Errorf("failed to deserialize overdue installment row into debt schedule model structure: %w", err)
 		}
 
 		// Convert the SELite integer flag back to a Go boolean
-		installment.IsPaid = is_paid_int == 1
+		installment.IsPaid = isPaidInt == 1
 		installments = append(installments, installment)
 	}
 
@@ -902,6 +922,9 @@ func (s *Store) SendFriendRequest(request *models.FriendRequest) error {
 	(id, sender_id, receiver_id)
 	VALUES (?,?,?);`
 
+	if request.ID == "" {
+		request.ID = create_new_ID()
+	}
 	_, err := s.db.Exec(query, request.ID, request.SenderID, request.ReceiverID)
 	if err != nil {
 		return fmt.Errorf("failed to insert pending relationship record for invitation request ID '%s': %w", request.ID, err)
@@ -978,33 +1001,37 @@ func (s *Store) ListOutgoingFriendRequests(userID string) ([]models.FriendReques
 	return requests, nil
 }
 
-func (s *Store) AcceptFriendRequest(requestID, senderID, receiverID string) error {
+func (s *Store) AcceptFriendRequest(requestID, receiverID string) error {
 	transaction, err := s.db.Begin()
 	if err != nil {
 		return fmt.Errorf("friend request acceptance aborted: failed to provision database transaction: %w", err)
 	}
 	defer transaction.Rollback()
 
-	// update the friend requests table
-	query := `
-	DELETE FROM friend_requests
-	WHERE id = ?;`
+	// Derive senderID directly from the database — never trust a client-supplied value.
+	// The WHERE also confirms the caller is the actual recipient of this request.
+	var senderID string
+	err = transaction.QueryRow(
+		`SELECT sender_id FROM friend_requests WHERE id = ? AND receiver_id = ?;`,
+		requestID, receiverID,
+	).Scan(&senderID)
+	if err != nil {
+		return fmt.Errorf("friend request acceptance failed: request ID '%s' not found or does not belong to receiver '%s': %w", requestID, receiverID, err)
+	}
 
-	_, err = transaction.Exec(query, requestID)
+	// Remove the pending invitation row
+	_, err = transaction.Exec(`DELETE FROM friend_requests WHERE id = ?;`, requestID)
 	if err != nil {
 		return fmt.Errorf("friend request acceptance failed: unable to clear invitation record ID '%s': %w", requestID, err)
 	}
 
-	// update the friends table to show the new relationship
-	// (for both users, ie user A is friends with user B, and user B is friends with user A)
-	query = `
-	INSERT OR IGNORE INTO friends
-	(user_id, friend_id)
-	VALUES (?1, ?2), (?2, ?1);`
-
-	_, err = transaction.Exec(query, senderID, receiverID)
+	// Create the bidirectional friendship
+	_, err = transaction.Exec(
+		`INSERT OR IGNORE INTO friends (user_id, friend_id) VALUES (?1, ?2), (?2, ?1);`,
+		senderID, receiverID,
+	)
 	if err != nil {
-		return fmt.Errorf("friend request acceptance failed: failed to generate mutual peer-to-peer mapping intersection for user IDs '%s' and '%s': %w", senderID, receiverID, err)
+		return fmt.Errorf("friend request acceptance failed: failed to generate mutual peer-to-peer mapping for user IDs '%s' and '%s': %w", senderID, receiverID, err)
 	}
 
 	if err = transaction.Commit(); err != nil {
@@ -1079,46 +1106,42 @@ func (s *Store) ListFriends(userID string) ([]models.Profile, error) {
 
 // NEW FEATURE : GROUPS
 
-// CreateGroup registers a new group entity and instantly binds the creator to the roster table.
 func (s *Store) CreateGroup(group *models.Group) error {
-	// 1. Begin a database transaction to ensure both writes succeed or both fail
-	tx, err := s.db.Begin()
+	// Generate a unique group identifier inside the store so the client never controls primary keys
+	if group.ID == "" {
+		group.ID = create_new_ID()
+	}
+
+	transaction, err := s.db.Begin()
 	if err != nil {
-		return fmt.Errorf("failed to begin group creation transaction: %w", err)
+		return fmt.Errorf("group creation aborted: failed to open transaction session context: %w", err)
 	}
-	// Defer a rollback. If the function returns early due to an error, tx.Rollback() clears the queue.
-	// If tx.Commit() is called successfully, the rollback becomes a no-op.
-	defer tx.Rollback()
+	// If the function exits early due to an error, roll back all pending changes
+	defer transaction.Rollback()
 
-	// 2. Insert the top-level group profile row
-	groupQuery := `
-	INSERT INTO groups (id, name, creator_id, created_at)
-	VALUES (?, ?, ?, ?);`
+	query := `
+	INSERT INTO groups (id, name, creator_id) VALUES (?, ?, ?);`
 
-	_, err = tx.Exec(groupQuery, group.ID, group.Name, group.CreatorID, group.CreatedAt)
+	_, err = transaction.Exec(query, group.ID, group.Name, group.CreatorID)
 	if err != nil {
-		return fmt.Errorf("failed to insert group metadata record: %w", err)
+		return fmt.Errorf("group creation failed: unable to write group record for group ID '%s': %w", group.ID, err)
 	}
 
-	// 3. Immediately insert the creator into the group_members junction table
-	memberQuery := `
-	INSERT INTO group_members (group_id, member_id, joined_at)
-	VALUES (?, ?, ?);`
+	// Immediately bind the creator to the membership table as the first member
+	query = `
+	INSERT INTO group_members (group_id, member_id) VALUES (?, ?);`
 
-	_, err = tx.Exec(memberQuery, group.ID, group.CreatorID, group.CreatedAt)
+	_, err = transaction.Exec(query, group.ID, group.CreatorID)
 	if err != nil {
-		return fmt.Errorf("failed to bind group creator to the membership table: %w", err)
+		return fmt.Errorf("group creation failed: unable to register creator '%s' as initial member of group ID '%s': %w", group.CreatorID, group.ID, err)
 	}
 
-	// 4. If both executions cleared, commit the transaction permanently to the disk asset file
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit group transaction to database file: %w", err)
+	if err = transaction.Commit(); err != nil {
+		return fmt.Errorf("group creation failed: transaction commit to disk rejected for group ID '%s': %w", group.ID, err)
 	}
-
 	return nil
 }
 
-// ListGroups queries the database to discover every group relationship mapped to a single user context.
 func (s *Store) ListGroups(userID string) ([]models.Group, error) {
 	query := `
 	SELECT groups.id, groups.name, groups.creator_id, groups.created_at
@@ -1136,6 +1159,7 @@ func (s *Store) ListGroups(userID string) ([]models.Group, error) {
 
 	for rows.Next() {
 		var g models.Group
+
 		err = rows.Scan(&g.ID, &g.Name, &g.CreatorID, &g.CreatedAt)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan database group row into model properties: %w", err)
@@ -1143,11 +1167,10 @@ func (s *Store) ListGroups(userID string) ([]models.Group, error) {
 		list = append(list, g)
 	}
 
-	// Check for any errors encountered during row iteration
+	// Check for errors encountered during iteration
 	if err = rows.Err(); err != nil {
 		return nil, fmt.Errorf("error encountered during group record row scanning loops: %w", err)
 	}
-
 	return list, nil
 }
 
@@ -1160,7 +1183,7 @@ func (s *Store) ListGroupMembers(groupID string) ([]models.Profile, error) {
 
 	rows, err := s.db.Query(query, groupID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to query member roster for group ID '%s': %w", groupID, err)
 	}
 	defer rows.Close()
 
@@ -1171,129 +1194,251 @@ func (s *Store) ListGroupMembers(groupID string) ([]models.Profile, error) {
 
 		err = rows.Scan(&m.ID, &m.Name, &m.Email, &m.PhoneNumber, &m.CreatedAt)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to deserialize member profile record from group roster query for group ID '%s': %w", groupID, err)
 		}
 		members = append(members, m)
 	}
 
+	// Check for errors encountered during iteration
 	if err = rows.Err(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("detected mid-stream cursor failure during member roster iteration for group ID '%s': %w", groupID, err)
 	}
 	return members, nil
 }
 
 func (s *Store) SendGroupInvitation(groupID, senderID, receiverID string) error {
 	query := `
-	INSERT INTO group_invitations
+	INSERT INTO group_invitations 
+	(id, group_id, sender_id, receiver_id) 
 	VALUES (?,?,?,?);`
 
-	invitationID := create_new_ID()
-
-	_, err := s.db.Exec(query, invitationID, groupID, senderID, receiverID)
+	_, err := s.db.Exec(query, create_new_ID(), groupID, senderID, receiverID)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to insert group invitation from sender '%s' to receiver '%s' for group ID '%s': %w", senderID, receiverID, groupID, err)
 	}
 	return nil
 }
 
-func (s *Store) AcceptGroupInvitation(invitationID string) error {
-	query := `
-    SELECT group_id, receiver_id
-    FROM group_invitations
-    WHERE id = ?`
+func (s *Store) AcceptGroupInvitation(invitationID, callerID string) error {
+	transaction, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("group invitation acceptance aborted: failed to open transaction session context: %w", err)
+	}
+	// If the function exits early due to an error, discard all pending changes
+	defer transaction.Rollback()
 
+	// Derive the group from the database and confirm the caller is the actual receiver —
+	// never trust a group ID supplied by the client
 	var groupID string
-	var userID string
+	query := `
+	SELECT group_id
+	FROM group_invitations
+	WHERE id = ? AND receiver_id = ?;`
 
-	err := s.db.QueryRow(query, invitationID).Scan(&groupID, &userID)
+	err = transaction.QueryRow(query, invitationID, callerID).Scan(&groupID)
 	if err != nil {
-		return err
+		return fmt.Errorf("group invitation acceptance failed: invitation ID '%s' not found or does not belong to receiver '%s': %w", invitationID, callerID, err)
 	}
 
+	// Remove the invitation row — accepted invitations do not persist as a status change
 	query = `
-    DELETE FROM group_invitations
-    WHERE id = ?`
+	DELETE FROM group_invitations
+	WHERE id = ?;`
 
-	_, err = s.db.Exec(query, invitationID)
+	_, err = transaction.Exec(query, invitationID)
 	if err != nil {
-		return err
+		return fmt.Errorf("group invitation acceptance failed: unable to remove invitation record ID '%s': %w", invitationID, err)
 	}
 
+	// Register the new member in the group roster
 	query = `
-    INSERT INTO group_members (group_id, member_id)
-    VALUES (?,?)`
+	INSERT OR IGNORE INTO group_members (group_id, member_id) VALUES (?, ?);`
 
-	_, err = s.db.Exec(query, groupID, userID)
+	_, err = transaction.Exec(query, groupID, callerID)
 	if err != nil {
-		return err
+		return fmt.Errorf("group invitation acceptance failed: unable to register user '%s' as a member of group ID '%s': %w", callerID, groupID, err)
 	}
 
+	if err = transaction.Commit(); err != nil {
+		return fmt.Errorf("group invitation acceptance failed: transaction commit to disk rejected for invitation ID '%s': %w", invitationID, err)
+	}
 	return nil
 }
 
-func (s *Store) DeclineGroupInvitation(invitationID string) error {
+func (s *Store) DeclineGroupInvitation(invitationID, callerID string) error {
+	// The WHERE clause on receiver_id ensures a user can only decline invitations sent to them
+	query := `
+	DELETE FROM group_invitations
+	WHERE id = ? AND receiver_id = ?;`
+
+	_, err := s.db.Exec(query, invitationID, callerID)
+	if err != nil {
+		return fmt.Errorf("failed to decline group invitation ID '%s' for receiver '%s': %w", invitationID, callerID, err)
+	}
+	return nil
 }
 
 func (s *Store) ListIncomingGroupInvitations(receiverID string) ([]models.GroupInvitation, error) {
+	query := `
+	SELECT id, group_id, sender_id, receiver_id, created_at
+	FROM group_invitations
+	WHERE receiver_id = ?;`
+
+	rows, err := s.db.Query(query, receiverID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query incoming group invitation directory for receiver ID '%s': %w", receiverID, err)
+	}
+	defer rows.Close()
+
+	invitations := []models.GroupInvitation{}
+
+	for rows.Next() {
+		var inv models.GroupInvitation
+
+		err = rows.Scan(&inv.ID, &inv.GroupID, &inv.SenderID, &inv.ReceiverID, &inv.CreatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to deserialize incoming group invitation record into model structure: %w", err)
+		}
+		invitations = append(invitations, inv)
+	}
+
+	// Check for errors encountered during iteration
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("detected mid-stream cursor failure during incoming group invitation iteration for receiver ID '%s': %w", receiverID, err)
+	}
+	return invitations, nil
 }
 
 func (s *Store) ListOutgoingGroupInvitations(senderID string) ([]models.GroupInvitation, error) {
+	query := `
+	SELECT id, group_id, sender_id, receiver_id, created_at
+	FROM group_invitations
+	WHERE sender_id = ?;`
+
+	rows, err := s.db.Query(query, senderID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query outgoing group invitation directory for sender ID '%s': %w", senderID, err)
+	}
+	defer rows.Close()
+
+	invitations := []models.GroupInvitation{}
+
+	for rows.Next() {
+		var inv models.GroupInvitation
+
+		err = rows.Scan(&inv.ID, &inv.GroupID, &inv.SenderID, &inv.ReceiverID, &inv.CreatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to deserialize outgoing group invitation record into model structure: %w", err)
+		}
+		invitations = append(invitations, inv)
+	}
+
+	// Check for errors encountered during iteration
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("detected mid-stream cursor failure during outgoing group invitation iteration for sender ID '%s': %w", senderID, err)
+	}
+	return invitations, nil
 }
 
 func (s *Store) LeaveGroup(groupID, userID string) error {
+	query := `
+	DELETE FROM group_members
+	WHERE group_id = ? AND member_id = ?;`
+
+	_, err := s.db.Exec(query, groupID, userID)
+	if err != nil {
+		return fmt.Errorf("failed to remove user ID '%s' from group ID '%s' membership roster: %w", userID, groupID, err)
+	}
+	return nil
 }
 
-func (s *Store) RemoveGroupMember(groupID, userID string) error {
+func (s *Store) RemoveGroupMember(groupID, targetUserID string) error {
+	query := `
+	DELETE FROM group_members
+	WHERE group_id = ? AND member_id = ?;`
+
+	_, err := s.db.Exec(query, groupID, targetUserID)
+	if err != nil {
+		return fmt.Errorf("failed to remove target user ID '%s' from group ID '%s' membership roster: %w", targetUserID, groupID, err)
+	}
+	return nil
 }
 
 func (s *Store) CreateNotification(n *models.Notification) error {
+	// Generate a unique notification identifier inside the store so the client never controls primary keys
 	if n.ID == "" {
 		n.ID = create_new_ID()
 	}
-	_, err := s.db.Exec(
-		`INSERT INTO notifications (id, user_id, type, title, body, link_view) VALUES (?,?,?,?,?,?);`,
-		n.ID, n.UserID, n.Type, n.Title, n.Body, n.LinkView,
-	)
-	return err
+
+	query := `
+	INSERT INTO notifications 
+	(id, user_id, type, title, body, link_view) 
+	VALUES (?,?,?,?,?,?);`
+
+	_, err := s.db.Exec(query, n.ID, n.UserID, n.Type, n.Title, n.Body, n.LinkView)
+	if err != nil {
+		return fmt.Errorf("failed to write notification record for user ID '%s': %w", n.UserID, err)
+	}
+	return nil
 }
 
 func (s *Store) ListNotifications(userID string) ([]models.Notification, error) {
-	rows, err := s.db.Query(
-		`SELECT id, user_id, type, title, body, link_view, is_seen, created_at
-		 FROM notifications WHERE user_id = ? AND is_seen = 0
-		 ORDER BY created_at DESC;`,
-		userID,
-	)
+	query := `
+	SELECT id, user_id, type, title, body, link_view, is_seen, created_at
+	FROM notifications
+	WHERE user_id = ? AND is_seen = 0
+	ORDER BY created_at DESC;`
+
+	rows, err := s.db.Query(query, userID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to retrieve unseen notification records for user ID '%s': %w", userID, err)
 	}
 	defer rows.Close()
 
 	notifs := []models.Notification{}
+
 	for rows.Next() {
 		var n models.Notification
 		var isSeen int
-		if err := rows.Scan(&n.ID, &n.UserID, &n.Type, &n.Title, &n.Body, &n.LinkView, &isSeen, &n.CreatedAt); err != nil {
-			return nil, err
+
+		err = rows.Scan(&n.ID, &n.UserID, &n.Type, &n.Title, &n.Body, &n.LinkView, &isSeen, &n.CreatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to deserialize notification row into model structure for user ID '%s': %w", userID, err)
 		}
+		// Convert the SQLite integer flag back to a Go boolean
 		n.IsSeen = isSeen == 1
 		notifs = append(notifs, n)
 	}
-	return notifs, rows.Err()
+
+	// Check for errors encountered during iteration
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("detected mid-stream cursor failure during notification iteration for user ID '%s': %w", userID, err)
+	}
+	return notifs, nil
 }
 
 func (s *Store) MarkNotificationSeen(notifID, userID string) error {
-	_, err := s.db.Exec(
-		`UPDATE notifications SET is_seen = 1 WHERE id = ? AND user_id = ?;`,
-		notifID, userID,
-	)
-	return err
+	query := `
+	UPDATE notifications
+	SET is_seen = 1
+	WHERE id = ? AND user_id = ?;`
+
+	_, err := s.db.Exec(query, notifID, userID)
+	if err != nil {
+		return fmt.Errorf("failed to mark notification ID '%s' as seen for user ID '%s': %w", notifID, userID, err)
+	}
+	return nil
 }
 
 func (s *Store) ClearAllNotifications(userID string) error {
-	_, err := s.db.Exec(
-		`UPDATE notifications SET is_seen = 1 WHERE user_id = ?;`,
-		userID,
-	)
-	return err
+	query := `
+	UPDATE notifications
+	SET is_seen = 1
+	WHERE user_id = ?;`
+
+	_, err := s.db.Exec(query, userID)
+	if err != nil {
+		return fmt.Errorf("failed to clear all notification records for user ID '%s': %w", userID, err)
+	}
+	return nil
 }

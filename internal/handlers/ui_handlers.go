@@ -782,7 +782,7 @@ func viewFriends(friends []models.Profile, friendRequests []models.FriendRequest
           <div style="font-size:12px;color:var(--text-faint);">Wants to be friends</div>
         </div>
         <div style="display:flex;gap:6px;">
-          <button onclick="acceptFriendRequest('` + req.ID + `','` + req.SenderID + `')"
+          <button onclick="acceptFriendRequest('` + req.ID + `')"
             style="background:var(--emerald);color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">
             Accept
           </button>
@@ -2052,9 +2052,9 @@ func dashboardScript() string {
   }
 
   // --- Accept / Decline friend requests -----------------------------------
-  function acceptFriendRequest(requestID, senderID) {
+  function acceptFriendRequest(requestID) {
     apiPost('/friends/request/accept',
-      { request_id: requestID, sender_id: senderID },
+      { request_id: requestID },
       function() { showToast('Friend request accepted'); setTimeout(function() { location.reload(); }, 800); },
       function(e) { showToast(e, 'warn'); }
     );

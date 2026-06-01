@@ -45,7 +45,7 @@ type PaymentRequest struct {
 
 type Installment struct {
 	ID           string  `json:"id"`
-	PaymentID    string  `json:"paymentID"`
+	PaymentID    string  `json:"payment_id"`
 	UserWithDebt string  `json:"user_id"`
 	Amount       float64 `json:"amount"`
 	DueDate      string  `json:"due_date"`
