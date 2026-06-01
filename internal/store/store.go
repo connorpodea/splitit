@@ -1037,13 +1037,16 @@ func (s *Store) ListFriends(userID string) ([]*models.Profile, error) {
 
 // NEW FEATURE : GROUPS
 
+func (s *Store) CreateGroup() {
+}
+
+func (s *Store) ListGroups() {
+}
+
+func (s *Store) ListGroupMembers() {
+}
+
 func (s *Store) SendGroupInvitation() {
-}
-
-func (s *Store) ListIncomingGroupInvitations() {
-}
-
-func (s *Store) ListOutgoingGroupInvitations() {
 }
 
 func (s *Store) AcceptGroupInvitation() {
@@ -1052,10 +1055,17 @@ func (s *Store) AcceptGroupInvitation() {
 func (s *Store) DeclineGroupInvitation() {
 }
 
+func (s *Store) ListIncomingGroupInvitations() {
+}
+
+func (s *Store) ListOutgoingGroupInvitations() {
+}
+
 func (s *Store) LeaveGroup() {
 }
 
-func (s *Store) ListGroups() {
+func (s *Store) RemoveGroupMember() {
+
 }
 
 func (s *Store) CreateNotification(n *models.Notification) error {
