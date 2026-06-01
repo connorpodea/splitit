@@ -67,18 +67,17 @@ type Group struct {
 	CreatedAt string `json:"created_at"`
 }
 
-type GroupInvitation struct {
-	ID         string `json:"id"`
-	GroupID    string `json:"group_id"`
-	SenderID   string `json:"sender_id"`
-	ReceiverID string `json:"receiver_id"`
-	CreatedAt  string `json:"created_at"`
-}
-
 type GroupMember struct {
 	GroupID  string `json:"group_id"`
 	MemberID string `json:"member_id"`
 	JoinedAt string `json:"joined_at"`
+}
+
+type GroupInvitation struct {
+	GroupID    string `json:"group_id"`
+	SenderID   string `json:"sender_id"`
+	ReceiverID string `json:"receiver_id"`
+	CreatedAt  string `json:"created_at"`
 }
 
 type Notification struct {

@@ -49,14 +49,6 @@ func NewFromPath(path string) (*Store, error) {
 	return s, nil
 }
 
-// current tables:
-// users
-// payments
-// payment_requests
-// installments
-// friends
-// friend_requests
-
 func (s *Store) createTables() error {
 	// users table
 	query := `
@@ -81,18 +73,18 @@ func (s *Store) createTables() error {
 	// FOREIGN KEY's ensure both user objects are found in users table
 	query = `
 	CREATE TABLE IF NOT EXISTS payments (
-	id TEXT PRIMARY KEY,
-	sender_id TEXT,
-	receiver_id TEXT,
-	amount REAL,
-	total_amount REAL,
-	note TEXT,
-	payment_type TEXT,
-	total_installments INTEGER,
-	status TEXT,
-	created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-	FOREIGN KEY (sender_id) REFERENCES users (id),
-	FOREIGN KEY (receiver_id) REFERENCES users (id)
+		id TEXT PRIMARY KEY,
+		sender_id TEXT,
+		receiver_id TEXT,
+		amount REAL,
+		total_amount REAL,
+		note TEXT,
+		payment_type TEXT,
+		total_installments INTEGER,
+		status TEXT,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (sender_id) REFERENCES users (id),
+		FOREIGN KEY (receiver_id) REFERENCES users (id)
 	);`
 
 	_, err = s.db.Exec(query)
@@ -102,15 +94,15 @@ func (s *Store) createTables() error {
 
 	// payment_requests table
 	query = `CREATE TABLE IF NOT EXISTS payment_requests (
-	id TEXT PRIMARY KEY,
-	requester_id TEXT,
-	payer_id TEXT,
-	amount REAL,
-	note TEXT,
-	status TEXT,
-	created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-	FOREIGN KEY (requester_id) REFERENCES users (id),
-	FOREIGN KEY (payer_id) REFERENCES users (id)
+		id TEXT PRIMARY KEY,
+		requester_id TEXT,
+		payer_id TEXT,
+		amount REAL,
+		note TEXT,
+		status TEXT,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (requester_id) REFERENCES users (id),
+		FOREIGN KEY (payer_id) REFERENCES users (id)
 	);`
 
 	_, err = s.db.Exec(query)
@@ -122,15 +114,15 @@ func (s *Store) createTables() error {
 	// FOREIGN KEY's ensure the payment exists in the payments table and the user exists in the user table
 	query = `
 	CREATE TABLE IF NOT EXISTS installments (
-	id TEXT PRIMARY KEY,
-	payment_id TEXT,
-	user_id TEXT,
-	amount REAL,
-	due_date TEXT,
-	is_paid INTEGER DEFAULT 0,
-	created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-	FOREIGN KEY (payment_id) REFERENCES payments (id),
-	FOREIGN KEY (user_id) REFERENCES users (id)
+		id TEXT PRIMARY KEY,
+		payment_id TEXT,
+		user_id TEXT,
+		amount REAL,
+		due_date TEXT,
+		is_paid INTEGER DEFAULT 0,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (payment_id) REFERENCES payments (id),
+		FOREIGN KEY (user_id) REFERENCES users (id)
 	);`
 
 	_, err = s.db.Exec(query)
@@ -143,12 +135,12 @@ func (s *Store) createTables() error {
 	// PRIMARY KEY ensures that friendships cannot duplicate
 	query = `
 	CREATE TABLE IF NOT EXISTS friends (
-	user_id TEXT,
-	friend_id TEXT,
-	created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-	PRIMARY KEY (user_id, friend_id),
-	FOREIGN KEY (user_id) references users (id),
-	FOREIGN KEY (friend_id) references users (id)
+		user_id TEXT,
+		friend_id TEXT,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		PRIMARY KEY (user_id, friend_id),
+		FOREIGN KEY (user_id) references users (id),
+		FOREIGN KEY (friend_id) references users (id)
 	);`
 
 	_, err = s.db.Exec(query)
@@ -160,12 +152,12 @@ func (s *Store) createTables() error {
 	// FOREIGN KEY's ensure that the users exist within the database
 	query = `
 	CREATE TABLE IF NOT EXISTS friend_requests (
-	id TEXT PRIMARY KEY,
-	sender_id TEXT,
-	receiver_id TEXT,
-	created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-	FOREIGN KEY (sender_id) REFERENCES users (id),
-	FOREIGN KEY (receiver_id) REFERENCES users (id)
+		id TEXT PRIMARY KEY,
+		sender_id TEXT,
+		receiver_id TEXT,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (sender_id) REFERENCES users (id),
+		FOREIGN KEY (receiver_id) REFERENCES users (id)
 	);`
 
 	_, err = s.db.Exec(query)
@@ -176,16 +168,66 @@ func (s *Store) createTables() error {
 	// notifications table
 	query = `
 	CREATE TABLE IF NOT EXISTS notifications (
-	id TEXT PRIMARY KEY,
-	user_id TEXT,
-	type TEXT,
-	title TEXT,
-	body TEXT,
-	link_view TEXT,
-	is_seen INTEGER DEFAULT 0,
-	created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-	FOREIGN KEY (user_id) REFERENCES users (id)
+		id TEXT PRIMARY KEY,
+		user_id TEXT,
+		type TEXT,
+		title TEXT,
+		body TEXT,
+		link_view TEXT,
+		is_seen INTEGER DEFAULT 0,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (user_id) REFERENCES users (id)
 	);`
+
+	_, err = s.db.Exec(query)
+	if err != nil {
+		return err
+	}
+
+	// groups table
+	query = `
+	CREATE TABLE IF NOT EXISTS groups (
+		id TEXT PRIMARY KEY,
+		name TEXT,
+		creator_id TEXT,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (creator_id) REFERENCES users (id)
+	);`
+
+	_, err = s.db.Exec(query)
+	if err != nil {
+		return err
+	}
+
+	// group members table
+	query = `
+	CREATE TABLE IF NOT EXISTS group_members (
+		group_id TEXT,
+		member_id TEXT,
+		joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		PRIMARY KEY (group_id, member_id),
+		FOREIGN KEY (group_id) REFERENCES groups (id),
+		FOREIGN KEY (member_id) REFERENCES users (id)
+	);`
+
+	_, err = s.db.Exec(query)
+	if err != nil {
+		return err
+	}
+
+	// group invitations table
+	query = `
+    CREATE TABLE IF NOT EXISTS group_invitations (
+        id TEXT PRIMARY KEY,
+        group_id TEXT NOT NULL,
+        sender_id TEXT NOT NULL,
+        receiver_id TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (group_id) REFERENCES groups (id),
+        FOREIGN KEY (sender_id) REFERENCES users (id),
+        FOREIGN KEY (receiver_id) REFERENCES users (id)
+    );`
 
 	_, err = s.db.Exec(query)
 	if err != nil {
@@ -1037,7 +1079,8 @@ func (s *Store) ListFriends(userID string) ([]*models.Profile, error) {
 
 // NEW FEATURE : GROUPS
 
-func (s *Store) CreateGroup() {
+func (s *Store) CreateGroup(new_group *models.Group) {
+	query := 
 }
 
 func (s *Store) ListGroups() {
