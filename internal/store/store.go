@@ -287,7 +287,8 @@ func (s *Store) GetProfile(id string) (*models.Profile, error) {
 func (s *Store) ListUsers() ([]models.User, error) {
 	query := `
 	SELECT id, name, email, phone_number, balance, credit_score, credit_limit, created_at 
-	FROM users;`
+	FROM users
+	ORDER BY name ASC;`
 
 	rows, err := s.db.Query(query)
 	if err != nil {
@@ -317,7 +318,8 @@ func (s *Store) ListUsers() ([]models.User, error) {
 func (s *Store) ListProfiles() ([]models.Profile, error) {
 	query := `
 	SELECT id, name, email, phone_number, created_at
-	FROM users;`
+	FROM users
+	ORDER BY name ASC;`
 
 	rows, err := s.db.Query(query)
 	if err != nil {
@@ -341,6 +343,40 @@ func (s *Store) ListProfiles() ([]models.Profile, error) {
 	if err = rows.Err(); err != nil {
 		return nil, fmt.Errorf("detected a mid-stream cursor failure during profiles row iteration loop: %w", err)
 	}
+	return profiles, nil
+}
+
+func (s *Store) SearchProfiles(queryStr string) ([]models.Profile, error) {
+	// Transform the query string into a SQL wildcard match format
+	wildcardQuery := fmt.Sprintf("%%%s%%", queryStr)
+
+	query := `
+	SELECT id, name, email, phone_number, created_at
+	FROM users
+	WHERE name LIKE ? OR email LIKE ?
+	ORDER BY name ASC;`
+
+	rows, err := s.db.Query(query, wildcardQuery, wildcardQuery)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute profiles global search query for token '%s': %w", queryStr, err)
+	}
+	defer rows.Close()
+
+	profiles := []models.Profile{}
+
+	for rows.Next() {
+		var p models.Profile
+		err = rows.Scan(&p.ID, &p.Name, &p.Email, &p.PhoneNumber, &p.CreatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan matching profile search record row: %w", err)
+		}
+		profiles = append(profiles, p)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("detected cursor failure mid-stream during profiles search loop execution:: %w", err)
+	}
+
 	return profiles, nil
 }
 
@@ -434,6 +470,70 @@ func (s *Store) GetPayment(paymentID string) (*models.Payment, error) {
 	return &payment, nil
 }
 
+func (s *Store) ListPaymentsReceived(userID string) ([]models.Payment, error) {
+	query := `
+    SELECT id, sender_id, receiver_id, amount, total_amount, note, payment_type, total_installments, status, created_at
+    FROM payments
+    WHERE receiver_id = ?
+    ORDER BY created_at DESC;`
+
+	rows, err := s.db.Query(query, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to look up inbound payment history ledger for user ID '%s': %w", userID, err)
+	}
+	defer rows.Close()
+
+	payments := []models.Payment{}
+
+	for rows.Next() {
+		var p models.Payment
+
+		err = rows.Scan(&p.ID, &p.SenderID, &p.ReceiverID, &p.Amount, &p.TotalAmount, &p.Note, &p.PaymentType, &p.TotalInstallments, &p.Status, &p.CreatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to unpack settlement fields into internal payment history model array: %w", err)
+		}
+
+		payments = append(payments, p)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("detected an unexpected structural read failure inside inbound transaction pipeline iteration for user ID '%s': %w", userID, err)
+	}
+	return payments, nil
+}
+
+func (s *Store) ListPaymentsSent(userID string) ([]models.Payment, error) {
+	query := `
+    SELECT id, sender_id, receiver_id, amount, total_amount, note, payment_type, total_installments, status, created_at
+    FROM payments
+    WHERE sender_id = ?
+    ORDER BY created_at DESC;`
+
+	rows, err := s.db.Query(query, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to look up inbound payment history ledger for user ID '%s': %w", userID, err)
+	}
+	defer rows.Close()
+
+	payments := []models.Payment{}
+
+	for rows.Next() {
+		var p models.Payment
+
+		err = rows.Scan(&p.ID, &p.SenderID, &p.ReceiverID, &p.Amount, &p.TotalAmount, &p.Note, &p.PaymentType, &p.TotalInstallments, &p.Status, &p.CreatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to unpack settlement fields into internal payment history model array: %w", err)
+		}
+
+		payments = append(payments, p)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("detected an unexpected structural read failure inside inbound transaction pipeline iteration for user ID '%s': %w", userID, err)
+	}
+	return payments, nil
+}
+
 func (s *Store) CreatePaymentRequest(request *models.PaymentRequest) error {
 	// Generate a unique request identifier inside the store so the client never controls primary keys
 	if request.ID == "" {
@@ -463,7 +563,8 @@ func (s *Store) ListIncomingPaymentRequests(userID string) ([]models.PaymentRequ
 	query := `
 	SELECT id, requester_id, payer_id, amount, note, status, created_at
 	FROM payment_requests
-	WHERE payer_id = ? AND status = 'pending';`
+	WHERE payer_id = ? AND status = 'pending'
+	ORDER BY created_at DESC;`
 
 	rows, err := s.db.Query(query, userID)
 	if err != nil {
@@ -494,7 +595,8 @@ func (s *Store) ListOutgoingPaymentRequests(userID string) ([]models.PaymentRequ
 	query := `
 	SELECT id, requester_id, payer_id, amount, note, status, created_at
 	FROM payment_requests
-	WHERE requester_id = ? AND status = 'pending';`
+	WHERE requester_id = ? AND status = 'pending'
+	ORDER BY created_at DESC;`
 
 	rows, err := s.db.Query(query, userID)
 	if err != nil {
@@ -847,7 +949,8 @@ func (s *Store) ListInstallments(userID string) ([]models.Installment, error) {
 	query := `
 	SELECT id, payment_id, user_id, amount, due_date, is_paid, created_at
 	FROM installments
-	WHERE user_id = ?;`
+	WHERE user_id = ?
+	ORDER BY due_date ASC;`
 
 	rows, err := s.db.Query(query, userID)
 
@@ -883,7 +986,8 @@ func (s *Store) ListOverdueInstallments(userID string) ([]models.Installment, er
 	query := `
 	SELECT id, payment_id, user_id, amount, due_date, is_paid, created_at
 	FROM installments
-	WHERE user_id = ? AND is_paid = 0 and due_date < ?;`
+	WHERE user_id = ? AND is_paid = 0 and due_date < ?
+	ORDER BY due_date ASC;`
 
 	today := time.Now().Format("2006-01-02")
 
@@ -943,7 +1047,8 @@ func (s *Store) ListIncomingFriendRequests(userID string) ([]models.FriendReques
 	query := `
 	SELECT id, sender_id, receiver_id, created_at
 	FROM friend_requests
-	WHERE receiver_id = ?;`
+	WHERE receiver_id = ?
+	ORDER BY created_at DESC;`
 
 	rows, err := s.db.Query(query, userID)
 	if err != nil {
@@ -974,7 +1079,8 @@ func (s *Store) ListOutgoingFriendRequests(userID string) ([]models.FriendReques
 	query := `
 	SELECT id, sender_id, receiver_id, created_at
 	FROM friend_requests
-	WHERE sender_id = ?;`
+	WHERE sender_id = ?
+	ORDER BY created_at DESC;`
 
 	rows, err := s.db.Query(query, userID)
 	if err != nil {
@@ -1077,7 +1183,8 @@ func (s *Store) ListFriends(userID string) ([]models.Profile, error) {
 	SELECT users.id, users.name, users.email, users.phone_number, users.created_at
 	FROM friends
 	JOIN users ON friends.friend_id = users.id
-	WHERE friends.user_id = ?;`
+	WHERE friends.user_id = ?
+	ORDER BY users.name ASC;`
 
 	rows, err := s.db.Query(query, userID)
 	if err != nil {
@@ -1147,7 +1254,8 @@ func (s *Store) ListGroups(userID string) ([]models.Group, error) {
 	SELECT groups.id, groups.name, groups.creator_id, groups.created_at
 	FROM groups
 	JOIN group_members ON groups.id = group_members.group_id
-	WHERE group_members.member_id = ?;`
+	WHERE group_members.member_id = ?
+	ORDER BY groups.name ASC;`
 
 	rows, err := s.db.Query(query, userID)
 	if err != nil {
@@ -1179,7 +1287,8 @@ func (s *Store) ListGroupMembers(groupID string) ([]models.Profile, error) {
 	SELECT users.id, users.name, users.email, users.phone_number, users.created_at
 	FROM users
 	JOIN group_members ON group_members.member_id = users.id
-	WHERE group_members.group_id = ?;`
+	WHERE group_members.group_id = ?
+	ORDER BY users.name ASC;`
 
 	rows, err := s.db.Query(query, groupID)
 	if err != nil {
@@ -1282,7 +1391,8 @@ func (s *Store) ListIncomingGroupInvitations(receiverID string) ([]models.GroupI
 	query := `
 	SELECT id, group_id, sender_id, receiver_id, created_at
 	FROM group_invitations
-	WHERE receiver_id = ?;`
+	WHERE receiver_id = ?
+	ORDER BY created_at DESC;`
 
 	rows, err := s.db.Query(query, receiverID)
 	if err != nil {
@@ -1313,7 +1423,8 @@ func (s *Store) ListOutgoingGroupInvitations(senderID string) ([]models.GroupInv
 	query := `
 	SELECT id, group_id, sender_id, receiver_id, created_at
 	FROM group_invitations
-	WHERE sender_id = ?;`
+	WHERE sender_id = ?
+	ORDER BY created_at DESC;`
 
 	rows, err := s.db.Query(query, senderID)
 	if err != nil {
@@ -1441,37 +1552,4 @@ func (s *Store) ClearAllNotifications(userID string) error {
 		return fmt.Errorf("failed to clear all notification records for user ID '%s': %w", userID, err)
 	}
 	return nil
-}
-
-func (s *Store) SearchProfiles(query string) ([]models.Profile, error) {
-	// Transform the query string into a SQL wildcard match format
-	wildcardQuery := fmt.Sprintf("%%%s%%", query)
-
-	queryStr := `
-	SELECT id, name, email, phone_number, created_at
-	FROM users
-	WHERE name LIKE ? OR email LIKE ?;`
-
-	rows, err := s.db.Query(queryStr, wildcardQuery, wildcardQuery)
-	if err != nil {
-		return nil, fmt.Errorf("failed to execute profiles global search query for token '%s': %w", query, err)
-	}
-	defer rows.Close()
-
-	profiles := []models.Profile{}
-
-	for rows.Next() {
-		var p models.Profile
-		err = rows.Scan(&p.ID, &p.Name, &p.Email, &p.PhoneNumber, &p.CreatedAt)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan matching profile search record row: %w", err)
-		}
-		profiles = append(profiles, p)
-	}
-
-	if err = rows.Err(); err != nil {
-		return nil, fmt.Errorf("detected cursor failure mid-stream during profiles search loop execution:: %w", err)
-	}
-
-	return profiles, nil
 }
