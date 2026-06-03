@@ -1442,3 +1442,36 @@ func (s *Store) ClearAllNotifications(userID string) error {
 	}
 	return nil
 }
+
+func (s *Store) SearchProfiles(query string) ([]models.Profile, error) {
+	// Transform the query string into a SQL wildcard match format
+	wildcardQuery := fmt.Sprintf("%%%s%%", query)
+
+	queryStr := `
+	SELECT id, name, email, phone_number, created_at
+	FROM users
+	WHERE name LIKE ? OR email LIKE ?;`
+
+	rows, err := s.db.Query(queryStr, wildcardQuery, wildcardQuery)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute profiles global search query for token '%s': %w", query, err)
+	}
+	defer rows.Close()
+
+	profiles := []models.Profile{}
+
+	for rows.Next() {
+		var p models.Profile
+		err = rows.Scan(&p.ID, &p.Name, &p.Email, &p.PhoneNumber, &p.CreatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan matching profile search record row: %w", err)
+		}
+		profiles = append(profiles, p)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("detected cursor failure mid-stream during profiles search loop execution:: %w", err)
+	}
+
+	return profiles, nil
+}
