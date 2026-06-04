@@ -101,9 +101,8 @@ type Notification struct {
 
 type UserSettings struct {
 	UserID             string    `json:"user_id"`
-	Theme              string    `json:"theme"`                // "light" or "dark"
-	DefaultLandingPage string    `json:"default_landing_page"` // "dashboard" or "activity" feed
-	EmailNotifications bool      `json:"email_notifications"`  // true/false toggle for transfer receipts
-	IsDiscoverable     bool      `json:"is_discoverable"`      // true/false: can other users find them in search?
+	Theme              string    `json:"theme"`
+	EmailNotifications bool      `json:"email_notifications"`
+	IsDiscoverable     bool      `json:"is_discoverable"`
 	UpdatedAt          time.Time `json:"updated_at"`
 }

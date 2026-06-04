@@ -73,7 +73,6 @@ func main() {
 	}
 }
 
-
 // split features
 
 // GetSpendingTotals(userID, since time.Time) — total sent, total received, net over a time window
@@ -100,4 +99,5 @@ func main() {
 // UpdateDisplayName(userID, newName)
 // DeactivateAccount(userID) — soft delete, sets an is_active flag rather than hard deleting
 // GetUserSettings(userID) — pull a settings row (separate table from users)
+
 // UpsertUserSettings(settings *models.UserSettings) — save UI/preference settings
