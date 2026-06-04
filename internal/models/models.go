@@ -33,6 +33,11 @@ type Payment struct {
 	CreatedAt         string  `json:"created_at"`
 }
 
+type PaymentWithInstallments struct {
+	Payment      Payment       `json:"payment"`
+	Installments []Installment `json:"installment"`
+}
+
 type PaymentRequest struct {
 	ID          string  `json:"id"`
 	RequesterID string  `json:"requester_id"`

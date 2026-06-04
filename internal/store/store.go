@@ -470,6 +470,63 @@ func (s *Store) GetPayment(paymentID string) (*models.Payment, error) {
 	return &payment, nil
 }
 
+func (s *Store) GetPaymentWithInstallments(paymentID string) (*models.PaymentWithInstallments, error) {
+	query := `
+	SELECT id, sender_id, receiver_id, amount, total_amount, note, payment_type, total_installments, status, created_at
+    FROM payments
+    WHERE id = ?;`
+
+	var pwi models.PaymentWithInstallments
+
+	err := s.db.QueryRow(query, paymentID).Scan(
+		&pwi.Payment.ID,
+		&pwi.Payment.SenderID,
+		&pwi.Payment.ReceiverID,
+		&pwi.Payment.Amount,
+		&pwi.Payment.TotalAmount,
+		&pwi.Payment.Note,
+		&pwi.Payment.PaymentType,
+		&pwi.Payment.TotalInstallments,
+		&pwi.Payment.Status,
+		&pwi.Payment.CreatedAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("payment transaction record ID '%s' not found: %w", paymentID, err)
+		}
+		return nil, fmt.Errorf("failed to retrieve master payment parameters for ID '%s': %w", paymentID, err)
+	}
+
+	query = `
+    SELECT id, payment_id, user_id, amount, due_date, is_paid, created_at
+    FROM installments
+    WHERE payment_id = ?
+    ORDER BY due_date ASC;`
+
+	rows, err := s.db.Query(query, paymentID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute installment timeline lookup for master payment ID '%s': %w", paymentID, err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var i models.Installment
+		var isPaidInt int // Intermediary variable to scan SQLite 0/1 integer flags safely
+
+		err = rows.Scan(&i.ID, &i.PaymentID, &i.UserWithDebt, &i.Amount, &i.DueDate, &isPaidInt, &i.CreatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to unpack individual installment schedule row segment: %w", err)
+		}
+
+		i.IsPaid = isPaidInt == 1
+		pwi.Installments = append(pwi.Installments, i)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("detected cursor failure during payment installments assembly pipeline: %w", err)
+	}
+	return &pwi, nil
+}
+
 func (s *Store) ListPaymentsReceived(userID string) ([]models.Payment, error) {
 	query := `
     SELECT id, sender_id, receiver_id, amount, total_amount, note, payment_type, total_installments, status, created_at
