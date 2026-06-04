@@ -227,5 +227,9 @@ func (s *Store) createTables() error {
     	FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
 	);`
 
+	_, err = s.db.Exec(query)
+	if err != nil {
+		return err
+	}
 	return nil
 }
