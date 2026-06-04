@@ -1625,3 +1625,5 @@ func (s *Store) ClearAllNotifications(userID string) error {
 	}
 	return nil
 }
+
+func (s *Store) UpsertUserSettings()

@@ -101,5 +101,3 @@ func main() {
 // DeactivateAccount(userID) — soft delete, sets an is_active flag rather than hard deleting
 // GetUserSettings(userID) — pull a settings row (separate table from users)
 // UpsertUserSettings(settings *models.UserSettings) — save UI/preference settings
-
-// CountUnseenNotifications(userID) — fast integer count for badge without loading the full list

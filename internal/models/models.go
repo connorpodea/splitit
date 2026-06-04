@@ -1,5 +1,7 @@
 package models
 
+import "time"
+
 type User struct {
 	ID           string  `json:"id"`
 	PasswordHash string  `json:"-"`
@@ -95,4 +97,13 @@ type Notification struct {
 	LinkView  string `json:"link_view"`
 	IsSeen    bool   `json:"is_seen"`
 	CreatedAt string `json:"created_at"`
+}
+
+type UserSettings struct {
+	UserID             string    `json:"user_id"`
+	Theme              string    `json:"theme"`                // "light" or "dark"
+	DefaultLandingPage string    `json:"default_landing_page"` // "dashboard" or "activity" feed
+	EmailNotifications bool      `json:"email_notifications"`  // true/false toggle for transfer receipts
+	IsDiscoverable     bool      `json:"is_discoverable"`      // true/false: can other users find them in search?
+	UpdatedAt          time.Time `json:"updated_at"`
 }
