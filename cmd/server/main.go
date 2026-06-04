@@ -102,8 +102,4 @@ func main() {
 // GetUserSettings(userID) — pull a settings row (separate table from users)
 // UpsertUserSettings(settings *models.UserSettings) — save UI/preference settings
 
-// SearchProfiles(query) — server-side search by name/username/phone instead of loading all profiles client-side
-// ListPaymentsReceived(userID) — incoming payments only
-// ListPaymentsSent(userID) — outgoing only
-// GetPaymentWithInstallments(paymentID) — payment + all its installments in one call
 // CountUnseenNotifications(userID) — fast integer count for badge without loading the full list

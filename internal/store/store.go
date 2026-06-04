@@ -219,8 +219,6 @@ func (s *Store) createTables() error {
 		return err
 	}
 
-	// group invitations table — no status column; accepted invitations create a membership row,
-	// declined invitations simply delete the row (mirrors the friend_requests pattern)
 	query = `
 	CREATE TABLE IF NOT EXISTS group_invitations (
 		id          TEXT     PRIMARY KEY,
@@ -507,6 +505,8 @@ func (s *Store) GetPaymentWithInstallments(paymentID string) (*models.PaymentWit
 		return nil, fmt.Errorf("failed to execute installment timeline lookup for master payment ID '%s': %w", paymentID, err)
 	}
 	defer rows.Close()
+
+	pwi.Installments = []models.Installment{}
 
 	for rows.Next() {
 		var i models.Installment
@@ -1583,6 +1583,21 @@ func (s *Store) ListNotifications(userID string) ([]models.Notification, error) 
 		return nil, fmt.Errorf("detected mid-stream cursor failure during notification iteration for user ID '%s': %w", userID, err)
 	}
 	return notifs, nil
+}
+
+func (s *Store) CountUnseenNotifications(userID string) (int, error) {
+	query := `
+	SELECT COUNT(*)
+	FROM notifications
+	WHERE user_id = ? AND is_seen = 0;`
+
+	var count int
+
+	err := s.db.QueryRow(query).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("failed to aggregate unseen notification count metric for user ID '%s': %w", userID, err)
+	}
+	return count, nil
 }
 
 func (s *Store) MarkNotificationSeen(notifID, userID string) error {
