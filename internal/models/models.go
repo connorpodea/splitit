@@ -1,5 +1,7 @@
 package models
 
+import "time"
+
 type User struct {
 	ID           string  `json:"id"`
 	PasswordHash string  `json:"-"`
@@ -33,6 +35,11 @@ type Payment struct {
 	CreatedAt         string  `json:"created_at"`
 }
 
+type PaymentWithInstallments struct {
+	Payment      Payment       `json:"payment"`
+	Installments []Installment `json:"installment"`
+}
+
 type PaymentRequest struct {
 	ID          string  `json:"id"`
 	RequesterID string  `json:"requester_id"`
@@ -45,7 +52,7 @@ type PaymentRequest struct {
 
 type Installment struct {
 	ID           string  `json:"id"`
-	PaymentID    string  `json:"paymentID"`
+	PaymentID    string  `json:"payment_id"`
 	UserWithDebt string  `json:"user_id"`
 	Amount       float64 `json:"amount"`
 	DueDate      string  `json:"due_date"`
@@ -60,6 +67,27 @@ type FriendRequest struct {
 	CreatedAt  string `json:"created_at"`
 }
 
+type Group struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	CreatorID string `json:"creator_id"`
+	CreatedAt string `json:"created_at"`
+}
+
+type GroupMember struct {
+	GroupID  string `json:"group_id"`
+	MemberID string `json:"member_id"`
+	JoinedAt string `json:"joined_at"`
+}
+
+type GroupInvitation struct {
+	ID         string `json:"id"`
+	GroupID    string `json:"group_id"`
+	SenderID   string `json:"sender_id"`
+	ReceiverID string `json:"receiver_id"`
+	CreatedAt  string `json:"created_at"`
+}
+
 type Notification struct {
 	ID        string `json:"id"`
 	UserID    string `json:"user_id"`
@@ -69,4 +97,13 @@ type Notification struct {
 	LinkView  string `json:"link_view"`
 	IsSeen    bool   `json:"is_seen"`
 	CreatedAt string `json:"created_at"`
+}
+
+type UserSettings struct {
+	UserID             string    `json:"user_id"`
+	Theme              string    `json:"theme"`                // "light" or "dark"
+	DefaultLandingPage string    `json:"default_landing_page"` // "dashboard" or "activity" feed
+	EmailNotifications bool      `json:"email_notifications"`  // true/false toggle for transfer receipts
+	IsDiscoverable     bool      `json:"is_discoverable"`      // true/false: can other users find them in search?
+	UpdatedAt          time.Time `json:"updated_at"`
 }
