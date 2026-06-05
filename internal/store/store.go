@@ -58,6 +58,7 @@ func (s *Store) createTables() error {
 		balance REAL NOT NULL,
 		credit_score INTEGER NOT NULL DEFAULT 50,
 		credit_limit REAL NOT NULL DEFAULT 1000.00,
+		is_active INTEGER NOT NULL DEFAULT 1,
 		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 	);`
 

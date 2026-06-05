@@ -101,6 +101,11 @@ func (h *Handler) LoginUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !user.IsActive {
+		WriteJSON(w, http.StatusForbidden, map[string]string{"error": "This account has been deactivated"})
+		return
+	}
+
 	// Compare the password to the currently stored password hash
 	err = bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(input.Password))
 	if err != nil {
@@ -160,6 +165,10 @@ func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
 	user, err := h.store.GetUser(userID)
 	if err != nil {
 		WriteJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
+	if !user.IsActive {
+		WriteJSON(w, http.StatusForbidden, map[string]string{"error": "This account has been deactivated"})
 		return
 	}
 

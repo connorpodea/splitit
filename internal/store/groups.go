@@ -85,7 +85,7 @@ func (s *Store) ListGroupMembers(groupID string) ([]models.Profile, error) {
 	SELECT users.id, users.name, users.email, users.phone_number, users.created_at
 	FROM users
 	JOIN group_members ON group_members.member_id = users.id
-	WHERE group_members.group_id = ?
+	WHERE group_members.group_id = ? AND users.is_active = 1
 	ORDER BY users.name ASC;`
 
 	rows, err := s.db.Query(query, groupID)

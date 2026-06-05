@@ -14,7 +14,7 @@ func (h *Handler) GetInitialView(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	user, err := h.store.GetUser(cookie.Value)
-	if err != nil {
+	if err != nil || !user.IsActive {
 		writeHTML(w, loginHTML())
 		return
 	}
@@ -55,7 +55,7 @@ func (h *Handler) GetDashboardView(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	user, err := h.store.GetUser(cookie.Value)
-	if err != nil {
+	if err != nil || !user.IsActive {
 		writeHTML(w, loginHTML())
 		return
 	}

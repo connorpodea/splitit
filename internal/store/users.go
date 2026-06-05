@@ -23,10 +23,11 @@ func (s *Store) CreateUser(user *models.User) error {
 
 func (s *Store) GetUser(userID string) (*models.User, error) {
 	query := `
-	SELECT id, password_hash, name, email, phone_number, balance, credit_score, credit_limit, created_at 
-	FROM users 
+	SELECT id, password_hash, name, email, phone_number, balance, credit_score, credit_limit, is_active, created_at
+	FROM users
 	WHERE id = ?;`
 	var user models.User
+	var isActiveInt int
 
 	err := s.db.QueryRow(query, userID).Scan(
 		&user.ID,
@@ -37,6 +38,7 @@ func (s *Store) GetUser(userID string) (*models.User, error) {
 		&user.Balance,
 		&user.CreditScore,
 		&user.CreditLimit,
+		&isActiveInt,
 		&user.CreatedAt,
 	)
 	if err != nil {
@@ -46,14 +48,15 @@ func (s *Store) GetUser(userID string) (*models.User, error) {
 		return nil, fmt.Errorf("failed to retrieve full account parameters for user ID '%s': %w", userID, err)
 	}
 
+	user.IsActive = isActiveInt == 1
 	return &user, nil
 }
 
 func (s *Store) GetProfile(id string) (*models.Profile, error) {
 	query := `
-	SELECT id, name, email, phone_number, created_at 
-	FROM users 
-	WHERE id = ?;`
+	SELECT id, name, email, phone_number, created_at
+	FROM users
+	WHERE id = ? AND is_active = 1;`
 	var profile models.Profile
 
 	err := s.db.QueryRow(query, id).Scan(
@@ -75,8 +78,9 @@ func (s *Store) GetProfile(id string) (*models.Profile, error) {
 
 func (s *Store) ListUsers() ([]models.User, error) {
 	query := `
-	SELECT id, name, email, phone_number, balance, credit_score, credit_limit, created_at 
+	SELECT id, name, email, phone_number, balance, credit_score, credit_limit, is_active, created_at
 	FROM users
+	WHERE is_active = 1
 	ORDER BY name ASC;`
 
 	rows, err := s.db.Query(query)
@@ -89,6 +93,7 @@ func (s *Store) ListUsers() ([]models.User, error) {
 
 	for rows.Next() {
 		var u models.User
+		var isActiveInt int
 
 		err := rows.Scan(
 			&u.ID,
@@ -98,15 +103,16 @@ func (s *Store) ListUsers() ([]models.User, error) {
 			&u.Balance,
 			&u.CreditScore,
 			&u.CreditLimit,
+			&isActiveInt,
 			&u.CreatedAt,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan row into user data struct during list aggregation: %w", err)
 		}
 
+		u.IsActive = isActiveInt == 1
 		users = append(users, u)
 	}
-	// Check for errors encountered during iteration
 	if err = rows.Err(); err != nil {
 		return nil, fmt.Errorf("detected a mid-stream cursor failure during users rows iteration loop: %w", err)
 	}
@@ -117,6 +123,7 @@ func (s *Store) ListProfiles() ([]models.Profile, error) {
 	query := `
 	SELECT id, name, email, phone_number, created_at
 	FROM users
+	WHERE is_active = 1
 	ORDER BY name ASC;`
 
 	rows, err := s.db.Query(query)
@@ -157,7 +164,7 @@ func (s *Store) SearchProfiles(queryStr string) ([]models.Profile, error) {
 	query := `
 	SELECT id, name, email, phone_number, created_at
 	FROM users
-	WHERE name LIKE ? OR email LIKE ?
+	WHERE is_active = 1 AND (name LIKE ? OR email LIKE ?)
 	ORDER BY name ASC;`
 
 	rows, err := s.db.Query(query, wildcardQuery, wildcardQuery)
@@ -285,6 +292,24 @@ func (s *Store) UpdateDisplayName(userID, newName string) error {
 // DeactivateAccount performs a defensive soft-delete state transition by setting the is_active flag
 // to false rather than purging the row, preserving ledger integrity.
 func (s *Store) DeactivateAccount(userID string) error {
+	query := `
+	UPDATE users
+	SET is_active = 0
+	WHERE id = ?;`
+
+	result, err := s.db.Exec(query, userID)
+	if err != nil {
+		return fmt.Errorf("failed to execute account deactivation state transition for user ID '%s': %w", userID, err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to read account deactivation execution state metrics: %w", err)
+	}
+	if rowsAffected == 0 {
+		return fmt.Errorf("account deactivation rejected: user ID '%s' not found in user registry", userID)
+	}
+
 	return nil
 }
 

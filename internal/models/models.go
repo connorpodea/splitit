@@ -11,6 +11,7 @@ type User struct {
 	Balance      float64 `json:"balance"`
 	CreditScore  uint8   `json:"credit_score"`
 	CreditLimit  float64 `json:"credit_limit"`
+	IsActive     bool    `json:"is_active"`
 	CreatedAt    string  `json:"created_at"`
 }
 

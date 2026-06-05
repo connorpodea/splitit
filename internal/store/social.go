@@ -217,7 +217,7 @@ func (s *Store) ListFriends(userID string) ([]models.Profile, error) {
 	SELECT users.id, users.name, users.email, users.phone_number, users.created_at
 	FROM friends
 	JOIN users ON friends.friend_id = users.id
-	WHERE friends.user_id = ?
+	WHERE friends.user_id = ? AND users.is_active = 1
 	ORDER BY users.name ASC;`
 
 	rows, err := s.db.Query(query, userID)
