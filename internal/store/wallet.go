@@ -1,6 +1,7 @@
 package store
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/connorpodea/splitit/internal/models"
@@ -9,7 +10,37 @@ import (
 // GetSpendingTotals computes total sent, total received, and net cash flow
 // for a user across a caller-specified time window.
 func (s *Store) GetSpendingTotals(userID string, since time.Time) (*models.SpendingTotals, error) {
-	return nil, nil
+	// Convert Go time object to standard SQLite text format (YYYY-MM-DD)
+	sinceStr := since.Format("2006-01-02")
+
+	// Single-pass query: Sums up 'sent' vs 'received' amounts using conditional CASE statements.
+	// COALESCE wraps the sums to guarantee a 0.0 fallback instead of a database NULL.
+	query := `
+    SELECT 
+    COALESCE(SUM(CASE WHEN sender_id = ? THEN amount ELSE 0 END), 0.0) AS total_sent,
+    COALESCE(SUM(CASE WHEN receiver_id = ? THEN amount ELSE 0 END), 0.0) AS total_received
+    FROM payments
+    WHERE (sender_id = ? OR receiver_id = ?) AND created_at >= ?;`
+
+	var totalSent float64
+	var totalReceived float64
+
+	err := s.db.QueryRow(query, userID, userID, userID, userID, sinceStr).Scan(&totalSent, &totalReceived)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute financial volume aggregation scenario for user '%s': %w", userID, err)
+	}
+
+	// Compute net cash flow
+	netFlow := totalReceived - totalSent
+
+	// Instantiate the return struct
+	spendingTotals := models.SpendingTotals{
+		TotalSent:     totalSent,
+		TotalReceived: totalReceived,
+		Net:           netFlow,
+	}
+
+	return &spendingTotals, nil
 }
 
 // ListPaymentsByUser aggregates a unified, chronologically ordered transaction feed
