@@ -146,9 +146,27 @@ func (s *Store) DeclineFriendRequest(requestID string) error {
 	DELETE FROM friend_requests
 	WHERE id = ?;`
 
-	_, err := s.db.Exec(query, requestID)
+	transaction, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to open transaction context for friend request decline: %w", err)
+	}
+	defer transaction.Rollback()
+
+	result, err := transaction.Exec(query, requestID)
 	if err != nil {
 		return fmt.Errorf("failed to execute removal delete action on friend request ID '%s': %w", requestID, err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to read execution state metrics: %w", err)
+	}
+	if rowsAffected == 0 {
+		return fmt.Errorf("decline rejected: friend request ID '%s' not found", requestID)
+	}
+
+	if err = transaction.Commit(); err != nil {
+		return fmt.Errorf("failed to finalize friend request decline on disk commit: %w", err)
 	}
 	return nil
 }
@@ -158,9 +176,27 @@ func (s *Store) RemoveFriendMutual(userID, friendID string) error {
 	DELETE FROM friends
 	WHERE (user_id = ? AND friend_id = ?) OR (user_id = ? AND friend_id = ?);`
 
-	_, err := s.db.Exec(query, userID, friendID, friendID, userID)
+	transaction, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to open transaction context for friend removal: %w", err)
+	}
+	defer transaction.Rollback()
+
+	result, err := transaction.Exec(query, userID, friendID, friendID, userID)
 	if err != nil {
 		return fmt.Errorf("failed to sever mutual bidirectional connection map matching user IDs '%s' and '%s': %w", userID, friendID, err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to read execution state metrics: %w", err)
+	}
+	if rowsAffected == 0 {
+		return fmt.Errorf("removal rejected: friendship between user IDs '%s' and '%s' not found", userID, friendID)
+	}
+
+	if err = transaction.Commit(); err != nil {
+		return fmt.Errorf("failed to finalize friend removal on disk commit: %w", err)
 	}
 	return nil
 }

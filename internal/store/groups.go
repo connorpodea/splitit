@@ -173,9 +173,27 @@ func (s *Store) DeclineGroupInvitation(invitationID, callerID string) error {
 	DELETE FROM group_invitations
 	WHERE id = ? AND receiver_id = ?;`
 
-	_, err := s.db.Exec(query, invitationID, callerID)
+	transaction, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to open transaction context for group invitation decline: %w", err)
+	}
+	defer transaction.Rollback()
+
+	result, err := transaction.Exec(query, invitationID, callerID)
 	if err != nil {
 		return fmt.Errorf("failed to decline group invitation ID '%s' for receiver '%s': %w", invitationID, callerID, err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to read execution state metrics: %w", err)
+	}
+	if rowsAffected == 0 {
+		return fmt.Errorf("decline rejected: invitation ID '%s' not found or does not belong to receiver '%s'", invitationID, callerID)
+	}
+
+	if err = transaction.Commit(); err != nil {
+		return fmt.Errorf("failed to finalize group invitation decline on disk commit: %w", err)
 	}
 	return nil
 }
@@ -249,9 +267,27 @@ func (s *Store) RemoveGroupMember(groupID, targetUserID string) error {
 	DELETE FROM group_members
 	WHERE group_id = ? AND member_id = ?;`
 
-	_, err := s.db.Exec(query, groupID, targetUserID)
+	transaction, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to open transaction context for group member removal: %w", err)
+	}
+	defer transaction.Rollback()
+
+	result, err := transaction.Exec(query, groupID, targetUserID)
 	if err != nil {
 		return fmt.Errorf("failed to remove target user ID '%s' from group ID '%s' membership roster: %w", targetUserID, groupID, err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to read execution state metrics: %w", err)
+	}
+	if rowsAffected == 0 {
+		return fmt.Errorf("removal rejected: user ID '%s' is not a member of group ID '%s'", targetUserID, groupID)
+	}
+
+	if err = transaction.Commit(); err != nil {
+		return fmt.Errorf("failed to finalize group member removal on disk commit: %w", err)
 	}
 	return nil
 }
@@ -261,9 +297,27 @@ func (s *Store) LeaveGroup(groupID, userID string) error {
 	DELETE FROM group_members
 	WHERE group_id = ? AND member_id = ?;`
 
-	_, err := s.db.Exec(query, groupID, userID)
+	transaction, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to open transaction context for group leave: %w", err)
+	}
+	defer transaction.Rollback()
+
+	result, err := transaction.Exec(query, groupID, userID)
 	if err != nil {
 		return fmt.Errorf("failed to remove user ID '%s' from group ID '%s' membership roster: %w", userID, groupID, err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to read execution state metrics: %w", err)
+	}
+	if rowsAffected == 0 {
+		return fmt.Errorf("leave rejected: user ID '%s' is not a member of group ID '%s'", userID, groupID)
+	}
+
+	if err = transaction.Commit(); err != nil {
+		return fmt.Errorf("failed to finalize group leave on disk commit: %w", err)
 	}
 	return nil
 }
