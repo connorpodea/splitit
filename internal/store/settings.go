@@ -108,7 +108,39 @@ func (s *Store) DeleteLinkedCard(cardID, userID string) error {
 
 // ListLinkedCards retrieves all external funding instruments currently registered to a specific user.
 func (s *Store) ListLinkedCards(userID string) ([]models.LinkedCard, error) {
-	return nil, nil
+	query := `
+    SELECT id, user_id, token_ref, last_4, brand, is_default, created_at
+    FROM linked_cards
+    WHERE user_id = ?;`
+
+	rows, err := s.db.Query(query, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute registered cards aggregation scan for user '%s': %w", userID, err)
+	}
+	defer rows.Close()
+
+	cards := []models.LinkedCard{}
+
+	for rows.Next() {
+		var c models.LinkedCard
+		var isDefaultInt int
+
+		err = rows.Scan(&c.ID, &c.UserID, &c.TokenRef, &c.Last4, &c.Brand, &isDefaultInt, &c.CreatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan database asset row into card data struct: %w", err)
+		}
+
+		// Convert the SQLite integer flag back to a clean Go boolean
+		c.IsDefault = isDefaultInt == 1
+		cards = append(cards, c)
+	}
+
+	// Verify that the database stream cursor didn't fail mid-flight
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("detected a mid-stream cursor failure during cards row iteration loop for user '%s': %w", userID, err)
+	}
+
+	return cards, nil
 }
 
 // GetLinkedCard fetches a single linked card record by composite card/user identity key pair.
