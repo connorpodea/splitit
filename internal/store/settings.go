@@ -15,7 +15,7 @@ func (s *Store) Deposit(userID string, amount float64) error {
 
 	transaction, err := s.db.Begin()
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to open transaction session context for deposit: %w", err)
 	}
 	// This discards changes if an error happens midway through
 	defer transaction.Rollback()
@@ -25,7 +25,6 @@ func (s *Store) Deposit(userID string, amount float64) error {
 		return fmt.Errorf("failed to clear balance deposit allocation of $%.2f for user ID '%s': %w", amount, userID, err)
 	}
 
-	// ◄ THE CRITICAL FIX: Lock the changes into disk permanently
 	if err = transaction.Commit(); err != nil {
 		return fmt.Errorf("critical ledger engine mismatch: failed to write deposit modifications to disk on final commit sequence: %w", err)
 	}
@@ -35,6 +34,26 @@ func (s *Store) Deposit(userID string, amount float64) error {
 
 // Withdraw debits the specified amount from a user's cash balance after liquid funds verification.
 func (s *Store) Withdraw(userID string, amount float64) error {
+	query := `
+	UPDATE users
+	SET balance = balance - ?
+	WHERE id = ?;`
+
+	transaction, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to open transaction session context for deposit: %w", err)
+	}
+	defer transaction.Rollback()
+
+	_, err = transaction.Exec(query, amount, userID)
+	if err != nil {
+		return fmt.Errorf("failed to clear balance withdraw allocation of $%.2f for user ID '%s': %w", amount, userID, err)
+	}
+
+	if err = transaction.Commit(); err != nil {
+		return fmt.Errorf("critical ledger engine mismatch: failed to write withdraw modifications to disk on final commit sequence: %w", err)
+	}
+
 	return nil
 }
 
