@@ -142,7 +142,15 @@ func (s *Store) ListLinkedCards(userID string) ([]models.LinkedCard, error) {
 		var c models.LinkedCard
 		var isDefaultInt int
 
-		err = rows.Scan(&c.ID, &c.UserID, &c.TokenRef, &c.Last4, &c.Brand, &isDefaultInt, &c.CreatedAt)
+		err = rows.Scan(
+			&c.ID,
+			&c.UserID,
+			&c.TokenRef,
+			&c.Last4,
+			&c.Brand,
+			&isDefaultInt,
+			&c.CreatedAt,
+		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan database asset row into card data struct: %w", err)
 		}
@@ -168,7 +176,15 @@ func (s *Store) GetLinkedCard(cardID, userID string) (*models.LinkedCard, error)
 	var c models.LinkedCard
 	var isDefaultInt int
 
-	err := s.db.QueryRow(query, cardID, userID).Scan(&c.ID, &c.UserID, &c.TokenRef, &c.Last4, &c.Brand, &isDefaultInt, &c.CreatedAt)
+	err := s.db.QueryRow(query, cardID, userID).Scan(
+		&c.ID,
+		&c.UserID,
+		&c.TokenRef,
+		&c.Last4,
+		&c.Brand,
+		&isDefaultInt,
+		&c.CreatedAt,
+	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, fmt.Errorf("linked card asset not found for card ID '%s' under user '%s': %w", cardID, userID, err)
@@ -204,15 +220,35 @@ func (s *Store) SetDefaultCard(cardID, userID string) error {
 	return nil
 }
 
-// ListWalletTransactions retrieves the absolute balance mutation history (deposits and withdrawals)
-// for a user, separate from the peer-to-peer payments ledger.
-func (s *Store) ListWalletTransactions(userID string) ([]models.WalletTx, error) {
-	return nil, nil
-}
-
 // GetUserSettings pulls preference and privacy configuration metadata from the user_settings table.
 func (s *Store) GetUserSettings(userID string) (*models.UserSettings, error) {
-	return nil, nil
+	query := `
+    SELECT user_id, theme, email_notifications, is_discoverable, updated_at
+    FROM user_settings
+    WHERE user_id = ?;`
+
+	var settings models.UserSettings
+	var emailNotifsInt int
+	var isDiscoverableInt int
+
+	err := s.db.QueryRow(query, userID).Scan(
+		&settings.UserID,
+		&settings.Theme,
+		&emailNotifsInt,
+		&isDiscoverableInt,
+		&settings.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("user configuration matrix not found for user ID '%s': %w", userID, err)
+		}
+		return nil, fmt.Errorf("failed to extract layout context metrics for user ID '%s': %w", userID, err)
+	}
+
+	settings.EmailNotifications = emailNotifsInt == 1
+	settings.IsDiscoverable = isDiscoverableInt == 1
+
+	return &settings, nil
 }
 
 func (s *Store) UpsertUserSettings(settings *models.UserSettings) error {

@@ -24,6 +24,12 @@ func (s *Store) ListPaymentsBetweenUsers(userID, otherID string) ([]models.Payme
 	return nil, nil
 }
 
+// ListWalletTransactions retrieves the absolute balance mutation history (deposits and withdrawals)
+// for a user, separate from the peer-to-peer payments ledger.
+func (s *Store) ListWalletTransactions(userID string) ([]models.WalletTx, error) {
+	return nil, nil
+}
+
 // GetMonthlySpendingSummary calculates absolute outflow, inflow, and active BNPL charge totals
 // for a specific calendar billing month.
 func (s *Store) GetMonthlySpendingSummary(userID string, year int, month time.Month) (*models.MonthlySummary, error) {

@@ -28,10 +28,6 @@ func (h *Handler) GetLinkedCard(w http.ResponseWriter, r *http.Request) {}
 // source for the authenticated user.
 func (h *Handler) SetDefaultCard(w http.ResponseWriter, r *http.Request) {}
 
-// ListWalletTransactions returns the absolute balance mutation history (deposits
-// and withdrawals) for the authenticated user, separate from the P2P payments ledger.
-func (h *Handler) ListWalletTransactions(w http.ResponseWriter, r *http.Request) {}
-
 // GetUserSettings returns the preference and privacy configuration metadata
 // for the authenticated user.
 func (h *Handler) GetUserSettings(w http.ResponseWriter, r *http.Request) {}

@@ -18,6 +18,10 @@ func (h *Handler) ListPaymentsByUser(w http.ResponseWriter, r *http.Request) {}
 // the authenticated user and a specified peer identity.
 func (h *Handler) ListPaymentsBetweenUsers(w http.ResponseWriter, r *http.Request) {}
 
+// ListWalletTransactions returns the absolute balance mutation history (deposits
+// and withdrawals) for the authenticated user, separate from the P2P payments ledger.
+func (h *Handler) ListWalletTransactions(w http.ResponseWriter, r *http.Request) {}
+
 // GetMonthlySpendingSummary returns absolute spending, income, and active BNPL
 // charge totals for a specific calendar billing month.
 func (h *Handler) GetMonthlySpendingSummary(w http.ResponseWriter, r *http.Request) {}
