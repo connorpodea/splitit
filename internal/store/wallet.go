@@ -204,8 +204,42 @@ func (s *Store) Withdraw(userID string, amountCents int) error {
 // ListWalletTransactions retrieves the absolute balance mutation history (deposits and withdrawals)
 // for a user, separate from the peer-to-peer payments ledger.
 func (s *Store) ListWalletTransactions(userID string) ([]models.WalletTransaction, error) {
+	query := `
+    SELECT id, user_id, amount_cents, transaction_type, created_at
+    FROM wallet_transactions
+    WHERE user_id = ?
+    ORDER BY created_at DESC;`
 
-	return nil, nil
+	rows, err := s.db.Query(query, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract wallet transaction ledger payload for user '%s': %w", userID, err)
+	}
+	defer rows.Close()
+
+	transactions := []models.WalletTransaction{}
+
+	for rows.Next() {
+		var t models.WalletTransaction
+
+		err = rows.Scan(
+			&t.ID,
+			&t.UserID,
+			&t.AmountCents,
+			&t.TransactionType,
+			&t.CreatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan wallet transaction segment row into data struct: %w", err)
+		}
+
+		transactions = append(transactions, t)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("detected stream cursor exception during wallet history compilation for user '%s': %w", userID, err)
+	}
+
+	return transactions, nil
 }
 
 // GetMonthlySpendingSummary calculates absolute outflow, inflow, and active BNPL charge totals

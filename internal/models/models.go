@@ -4,16 +4,16 @@ import "time"
 
 // User represents a registered account holder with financial and identity attributes.
 type User struct {
-	ID              string `json:"id"`
-	PasswordHash    string `json:"-"`
-	Name            string `json:"name"`
-	Email           string `json:"email"`
-	PhoneNumber     string `json:"phone_number"`
-	BalanceCents    int    `json:"balance_cents"`
-	CreditScore     uint8  `json:"credit_score"`
-	CreditLimitCents int   `json:"credit_limit_cents"`
-	IsActive        bool   `json:"is_active"`
-	CreatedAt       string `json:"created_at"`
+	ID               string `json:"id"`
+	PasswordHash     string `json:"-"`
+	Name             string `json:"name"`
+	Email            string `json:"email"`
+	PhoneNumber      string `json:"phone_number"`
+	BalanceCents     int    `json:"balance_cents"`
+	CreditScore      uint8  `json:"credit_score"`
+	CreditLimitCents int    `json:"credit_limit_cents"`
+	IsActive         bool   `json:"is_active"`
+	CreatedAt        string `json:"created_at"`
 }
 
 // Profile is the public-facing subset of a User, safe to expose to other users.
@@ -174,9 +174,9 @@ type LinkedCard struct {
 // WalletTransaction records an absolute balance mutation event (deposit or withdrawal) on a user account.
 // Distinct from peer-to-peer Payment records in the payments ledger.
 type WalletTransaction struct {
-	ID          string `json:"id"`
-	UserID      string `json:"user_id"`
-	Type        string `json:"type"` // "deposit" | "withdrawal"
-	AmountCents int    `json:"amount_cents"`
-	CreatedAt   string `json:"created_at"`
+	ID              string `json:"id"`
+	UserID          string `json:"user_id"`
+	AmountCents     int    `json:"amount_cents"`
+	TransactionType string `json:"type"` // "deposit" | "withdrawal"
+	CreatedAt       string `json:"created_at"`
 }
