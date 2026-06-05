@@ -129,8 +129,8 @@ func (s *Store) createTables() error {
 		friend_id TEXT NOT NULL,
 		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		PRIMARY KEY (user_id, friend_id),
-		FOREIGN KEY (user_id) REFERENCES users (id),
-		FOREIGN KEY (friend_id) REFERENCES users (id)
+		FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+		FOREIGN KEY (friend_id) REFERENCES users (id) ON DELETE CASCADE
 	);`
 
 	_, err = s.db.Exec(query)
@@ -144,8 +144,8 @@ func (s *Store) createTables() error {
 		sender_id TEXT NOT NULL,
 		receiver_id TEXT NOT NULL,
 		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-		FOREIGN KEY (sender_id) REFERENCES users (id),
-		FOREIGN KEY (receiver_id) REFERENCES users (id)
+		FOREIGN KEY (sender_id) REFERENCES users (id) ON DELETE CASCADE,
+		FOREIGN KEY (receiver_id) REFERENCES users (id) ON DELETE CASCADE
 	);`
 
 	_, err = s.db.Exec(query)
@@ -163,7 +163,7 @@ func (s *Store) createTables() error {
 		link_view TEXT NOT NULL,
 		is_seen INTEGER NOT NULL DEFAULT 0,
 		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-		FOREIGN KEY (user_id) REFERENCES users (id)
+		FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
 	);`
 
 	_, err = s.db.Exec(query)
@@ -191,8 +191,8 @@ func (s *Store) createTables() error {
 		member_id TEXT NOT NULL,
 		joined_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		PRIMARY KEY (group_id, member_id),
-		FOREIGN KEY (group_id)  REFERENCES groups (id),
-		FOREIGN KEY (member_id) REFERENCES users (id)
+		FOREIGN KEY (group_id)  REFERENCES groups (id) ON DELETE CASCADE,
+		FOREIGN KEY (member_id) REFERENCES users (id) ON DELETE CASCADE
 	);`
 
 	_, err = s.db.Exec(query)
@@ -207,9 +207,9 @@ func (s *Store) createTables() error {
 		sender_id TEXT NOT NULL,
 		receiver_id TEXT NOT NULL,
 		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-		FOREIGN KEY (group_id) REFERENCES groups (id),
-		FOREIGN KEY (sender_id) REFERENCES users (id),
-		FOREIGN KEY (receiver_id) REFERENCES users (id)
+		FOREIGN KEY (group_id) REFERENCES groups (id) ON DELETE CASCADE,
+		FOREIGN KEY (sender_id) REFERENCES users (id) ON DELETE CASCADE,
+		FOREIGN KEY (receiver_id) REFERENCES users (id) ON DELETE CASCADE
 	);`
 
 	_, err = s.db.Exec(query)
