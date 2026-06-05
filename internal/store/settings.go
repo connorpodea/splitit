@@ -8,6 +8,28 @@ import (
 
 // Deposit credits the specified amount to a user's available cash balance.
 func (s *Store) Deposit(userID string, amount float64) error {
+	query := `
+	UPDATE users
+	SET balance = balance + ?
+	WHERE id = ?;`
+
+	transaction, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	// This discards changes if an error happens midway through
+	defer transaction.Rollback()
+
+	_, err = transaction.Exec(query, amount, userID)
+	if err != nil {
+		return fmt.Errorf("failed to clear balance deposit allocation of $%.2f for user ID '%s': %w", amount, userID, err)
+	}
+
+	// ◄ THE CRITICAL FIX: Lock the changes into disk permanently
+	if err = transaction.Commit(); err != nil {
+		return fmt.Errorf("critical ledger engine mismatch: failed to write deposit modifications to disk on final commit sequence: %w", err)
+	}
+
 	return nil
 }
 
