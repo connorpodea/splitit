@@ -1,1 +1,13 @@
 app.db
+*.db
+*.sqlite
+
+# compiled binary
+splitit
+
+# macOS
+.DS_Store
+
+# env / secrets
+.env
+.env.*
