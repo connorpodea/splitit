@@ -1,6 +1,8 @@
 package store
 
 import (
+	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/connorpodea/splitit/internal/models"
@@ -92,7 +94,10 @@ func (s *Store) GetPayment(paymentID string) (*models.Payment, error) {
 
 	err := s.db.QueryRow(query, paymentID).Scan(&payment.ID, &payment.SenderID, &payment.ReceiverID, &payment.Amount, &payment.TotalAmount, &payment.Note, &payment.PaymentType, &payment.TotalInstallments, &payment.Status, &payment.CreatedAt)
 	if err != nil {
-		return nil, fmt.Errorf("failed to retrieve payment record for transaction ID '%s' : %w", paymentID, err)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("payment record not found for transaction ID '%s': %w", paymentID, err)
+		}
+		return nil, fmt.Errorf("failed to retrieve payment record for transaction ID '%s': %w", paymentID, err)
 	}
 	return &payment, nil
 }

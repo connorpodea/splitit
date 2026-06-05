@@ -1,6 +1,8 @@
 package store
 
 import (
+	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/connorpodea/splitit/internal/models"
@@ -28,6 +30,9 @@ func (s *Store) GetUser(userID string) (*models.User, error) {
 
 	err := s.db.QueryRow(query, userID).Scan(&user.ID, &user.PasswordHash, &user.Name, &user.Email, &user.PhoneNumber, &user.Balance, &user.CreditScore, &user.CreditLimit, &user.CreatedAt)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("user account not found for ID '%s': %w", userID, err)
+		}
 		return nil, fmt.Errorf("failed to retrieve full account parameters for user ID '%s': %w", userID, err)
 	}
 
@@ -43,6 +48,9 @@ func (s *Store) GetProfile(id string) (*models.Profile, error) {
 
 	err := s.db.QueryRow(query, id).Scan(&profile.ID, &profile.Name, &profile.Email, &profile.PhoneNumber, &profile.CreatedAt)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("profile not found for user ID '%s': %w", id, err)
+		}
 		return nil, fmt.Errorf("failed to pull minimalist public profile metadata for user ID '%s': %w", id, err)
 	}
 

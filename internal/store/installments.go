@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"math"
 	"time"
@@ -398,7 +399,7 @@ func (s *Store) GetPaymentWithInstallments(paymentID string) (*models.PaymentWit
 		&pwi.Payment.Status,
 		&pwi.Payment.CreatedAt)
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil, fmt.Errorf("payment transaction record ID '%s' not found: %w", paymentID, err)
 		}
 		return nil, fmt.Errorf("failed to retrieve master payment parameters for ID '%s': %w", paymentID, err)
