@@ -170,6 +170,25 @@ func (s *Store) GetLinkedCard(cardID, userID string) (*models.LinkedCard, error)
 // SetDefaultCard flags an individual card as the principal funding source for a user account,
 // clearing any previously active default flag in the same atomic operation.
 func (s *Store) SetDefaultCard(cardID, userID string) error {
+	// The CASE statement checks each row: if the ID matches cardID, give it a 1. Otherwise, give it a 0.
+	query := `
+    UPDATE linked_cards
+    SET is_default = CASE WHEN id = ? THEN 1 ELSE 0 END
+    WHERE user_id = ?;`
+
+	result, err := s.db.Exec(query, cardID, userID)
+	if err != nil {
+		return fmt.Errorf("failed to update principal funding allocation matrix for user '%s': %w", userID, err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to read default flag execution metrics: %w", err)
+	}
+	if rowsAffected == 0 {
+		return fmt.Errorf("default assignment rejected: card ID '%s' not found or unauthorized for user '%s'", cardID, userID)
+	}
+
 	return nil
 }
 
