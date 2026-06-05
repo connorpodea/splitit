@@ -209,7 +209,7 @@ func (h *Handler) UpdatePaymentRequestStatus(w http.ResponseWriter, r *http.Requ
 
 // paySheetHTML renders the bottom-sheet HTML for the payment action, containing both the
 // direct send tab and the BNPL loan tab with friend selector and amount inputs.
-func paySheetHTML(friends []models.Profile, availableCredit float64) string {
+func paySheetHTML(friends []models.Profile, availableCreditCents int) string {
 	friendOpts := `<option value="">Select a friend…</option>`
 	for _, f := range friends {
 		dname := profileDisplayName(&f)
@@ -253,7 +253,7 @@ func paySheetHTML(friends []models.Profile, availableCredit float64) string {
     <div class="sheet-pane" data-pay-pane="bnpl">
       <div class="info-card">
         <span class="label">Available credit</span>
-        <span class="val mono">$` + fmt.Sprintf("%.2f", availableCredit) + `</span>
+        <span class="val mono">$` + fmt.Sprintf("%d.%02d", availableCreditCents/100, availableCreditCents%100) + `</span>
       </div>
       <div>
         <label class="modal-lbl">Recipient</label>

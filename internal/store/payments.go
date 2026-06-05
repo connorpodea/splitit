@@ -25,29 +25,29 @@ func (s *Store) Pay(payment *models.Payment) error {
 	defer transaction.Rollback()
 
 	// Block the sender from going into negative balance
-	var currentBalance float64
+	var currentBalanceCents int
 	balanceQuery := `
-	SELECT balance
+	SELECT balance_cents
 	FROM users
 	WHERE id = ?;`
-	err = transaction.QueryRow(balanceQuery, payment.SenderID).Scan(&currentBalance)
+	err = transaction.QueryRow(balanceQuery, payment.SenderID).Scan(&currentBalanceCents)
 	if err != nil {
 		return fmt.Errorf("ledger settlement failed: unable to verify sender funds: %w", err)
 	}
 
-	if currentBalance < payment.Amount {
-		return fmt.Errorf("ledger settlement rejected: insufficient liquid funds (ID: '%s' attempted to pay $%.2f but only has $%.2f)", payment.SenderID, payment.Amount, currentBalance)
+	if currentBalanceCents < payment.AmountCents {
+		return fmt.Errorf("ledger settlement rejected: insufficient liquid funds (ID: '%s' attempted to pay %d cents but only has %d cents)", payment.SenderID, payment.AmountCents, currentBalanceCents)
 	}
 
 	// Update the senders balance to deduct the upfront payment
 	query := `
 	UPDATE users
-	SET balance = balance - ?
+	SET balance_cents = balance_cents - ?
 	WHERE id = ?;`
 
-	result, err := transaction.Exec(query, payment.Amount, payment.SenderID)
+	result, err := transaction.Exec(query, payment.AmountCents, payment.SenderID)
 	if err != nil {
-		return fmt.Errorf("ledger settlement failed: unable to clear balance deduction of $%.2f from sender ID '%s': %w", payment.Amount, payment.SenderID, err)
+		return fmt.Errorf("ledger settlement failed: unable to clear balance deduction of %d cents from sender ID '%s': %w", payment.AmountCents, payment.SenderID, err)
 	}
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
@@ -60,12 +60,12 @@ func (s *Store) Pay(payment *models.Payment) error {
 	// Update receivers balance to receive the total payment
 	query = `
 	UPDATE users
-	SET balance = balance + ?
+	SET balance_cents = balance_cents + ?
 	WHERE id = ?;`
 
-	result, err = transaction.Exec(query, payment.TotalAmount, payment.ReceiverID)
+	result, err = transaction.Exec(query, payment.TotalAmountCents, payment.ReceiverID)
 	if err != nil {
-		return fmt.Errorf("ledger settlement failed: unable to credit balance allocation of $%.2f to receiver ID '%s': %w", payment.TotalAmount, payment.ReceiverID, err)
+		return fmt.Errorf("ledger settlement failed: unable to credit balance allocation of %d cents to receiver ID '%s': %w", payment.TotalAmountCents, payment.ReceiverID, err)
 	}
 	rowsAffected, err = result.RowsAffected()
 	if err != nil {
@@ -77,11 +77,11 @@ func (s *Store) Pay(payment *models.Payment) error {
 
 	// Create a new row in the senders payment table
 	query = `
-	INSERT INTO payments 
-	(id, sender_id, receiver_id, amount, total_amount, note, payment_type, total_installments, status)
+	INSERT INTO payments
+	(id, sender_id, receiver_id, amount_cents, total_amount_cents, note, payment_type, total_installments, status)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`
 
-	_, err = transaction.Exec(query, payment.ID, payment.SenderID, payment.ReceiverID, payment.Amount, payment.TotalAmount, payment.Note, payment.PaymentType, payment.TotalInstallments, payment.Status)
+	_, err = transaction.Exec(query, payment.ID, payment.SenderID, payment.ReceiverID, payment.AmountCents, payment.TotalAmountCents, payment.Note, payment.PaymentType, payment.TotalInstallments, payment.Status)
 	if err != nil {
 		return fmt.Errorf("ledger settlement failed: historical transaction entry creation with ID '%s' rejected by database: %w", payment.ID, err)
 	}
@@ -95,7 +95,7 @@ func (s *Store) Pay(payment *models.Payment) error {
 		UserID:   payment.ReceiverID,
 		Type:     "payment_received",
 		Title:    "Payment received",
-		Body:     fmt.Sprintf("@%s paid you $%.2f", payment.SenderID, payment.Amount),
+		Body:     fmt.Sprintf("@%s paid you %d cents", payment.SenderID, payment.AmountCents),
 		LinkView: "activity",
 	})
 	return nil
@@ -104,7 +104,7 @@ func (s *Store) Pay(payment *models.Payment) error {
 // GetPayment retrieves a single payment record by its transaction ID.
 func (s *Store) GetPayment(paymentID string) (*models.Payment, error) {
 	query := `
-	SELECT id, sender_id, receiver_id, amount, total_amount, note, payment_type, total_installments, status, created_at
+	SELECT id, sender_id, receiver_id, amount_cents, total_amount_cents, note, payment_type, total_installments, status, created_at
 	FROM payments
 	WHERE id = ?;`
 
@@ -114,8 +114,8 @@ func (s *Store) GetPayment(paymentID string) (*models.Payment, error) {
 		&payment.ID,
 		&payment.SenderID,
 		&payment.ReceiverID,
-		&payment.Amount,
-		&payment.TotalAmount,
+		&payment.AmountCents,
+		&payment.TotalAmountCents,
 		&payment.Note,
 		&payment.PaymentType,
 		&payment.TotalInstallments,
@@ -134,7 +134,7 @@ func (s *Store) GetPayment(paymentID string) (*models.Payment, error) {
 // ListPaymentsReceived returns all inbound payment records for a user, ordered newest first.
 func (s *Store) ListPaymentsReceived(userID string) ([]models.Payment, error) {
 	query := `
-    SELECT id, sender_id, receiver_id, amount, total_amount, note, payment_type, total_installments, status, created_at
+    SELECT id, sender_id, receiver_id, amount_cents, total_amount_cents, note, payment_type, total_installments, status, created_at
     FROM payments
     WHERE receiver_id = ?
     ORDER BY created_at DESC;`
@@ -154,8 +154,8 @@ func (s *Store) ListPaymentsReceived(userID string) ([]models.Payment, error) {
 			&p.ID,
 			&p.SenderID,
 			&p.ReceiverID,
-			&p.Amount,
-			&p.TotalAmount,
+			&p.AmountCents,
+			&p.TotalAmountCents,
 			&p.Note,
 			&p.PaymentType,
 			&p.TotalInstallments,
@@ -178,7 +178,7 @@ func (s *Store) ListPaymentsReceived(userID string) ([]models.Payment, error) {
 // ListPaymentsSent returns all outbound payment records for a user, ordered newest first.
 func (s *Store) ListPaymentsSent(userID string) ([]models.Payment, error) {
 	query := `
-    SELECT id, sender_id, receiver_id, amount, total_amount, note, payment_type, total_installments, status, created_at
+    SELECT id, sender_id, receiver_id, amount_cents, total_amount_cents, note, payment_type, total_installments, status, created_at
     FROM payments
     WHERE sender_id = ?
     ORDER BY created_at DESC;`
@@ -198,8 +198,8 @@ func (s *Store) ListPaymentsSent(userID string) ([]models.Payment, error) {
 			&p.ID,
 			&p.SenderID,
 			&p.ReceiverID,
-			&p.Amount,
-			&p.TotalAmount,
+			&p.AmountCents,
+			&p.TotalAmountCents,
 			&p.Note,
 			&p.PaymentType,
 			&p.TotalInstallments,
@@ -228,10 +228,10 @@ func (s *Store) CreatePaymentRequest(request *models.PaymentRequest) error {
 
 	query := `
 	INSERT INTO payment_requests
-	(id, requester_id, payer_id, amount, note, status)
+	(id, requester_id, payer_id, amount_cents, note, status)
 	VALUES (?,?,?,?,?,?);`
 
-	_, err := s.db.Exec(query, request.ID, request.RequesterID, request.PayerID, request.Amount, request.Note, request.Status)
+	_, err := s.db.Exec(query, request.ID, request.RequesterID, request.PayerID, request.AmountCents, request.Note, request.Status)
 	if err != nil {
 		return fmt.Errorf("failed to push open payment demand requisition with invoice ID '%s' into table ledgers: %w", request.ID, err)
 	}
@@ -240,7 +240,7 @@ func (s *Store) CreatePaymentRequest(request *models.PaymentRequest) error {
 		UserID:   request.PayerID,
 		Type:     "payment_request",
 		Title:    "Payment request",
-		Body:     fmt.Sprintf("@%s is requesting $%.2f from you", request.RequesterID, request.Amount),
+		Body:     fmt.Sprintf("@%s is requesting %d cents from you", request.RequesterID, request.AmountCents),
 		LinkView: "activity",
 	})
 	return nil
@@ -249,7 +249,7 @@ func (s *Store) CreatePaymentRequest(request *models.PaymentRequest) error {
 // ListIncomingPaymentRequests returns all pending payment requests where the user is the payer.
 func (s *Store) ListIncomingPaymentRequests(userID string) ([]models.PaymentRequest, error) {
 	query := `
-	SELECT id, requester_id, payer_id, amount, note, status, created_at
+	SELECT id, requester_id, payer_id, amount_cents, note, status, created_at
 	FROM payment_requests
 	WHERE payer_id = ? AND status = 'pending'
 	ORDER BY created_at DESC;`
@@ -269,7 +269,7 @@ func (s *Store) ListIncomingPaymentRequests(userID string) ([]models.PaymentRequ
 			&r.ID,
 			&r.RequesterID,
 			&r.PayerID,
-			&r.Amount,
+			&r.AmountCents,
 			&r.Note,
 			&r.Status,
 			&r.CreatedAt,
@@ -290,7 +290,7 @@ func (s *Store) ListIncomingPaymentRequests(userID string) ([]models.PaymentRequ
 // ListOutgoingPaymentRequests returns all pending payment requests that the user has sent out.
 func (s *Store) ListOutgoingPaymentRequests(userID string) ([]models.PaymentRequest, error) {
 	query := `
-	SELECT id, requester_id, payer_id, amount, note, status, created_at
+	SELECT id, requester_id, payer_id, amount_cents, note, status, created_at
 	FROM payment_requests
 	WHERE requester_id = ? AND status = 'pending'
 	ORDER BY created_at DESC;`
@@ -310,7 +310,7 @@ func (s *Store) ListOutgoingPaymentRequests(userID string) ([]models.PaymentRequ
 			&r.ID,
 			&r.RequesterID,
 			&r.PayerID,
-			&r.Amount,
+			&r.AmountCents,
 			&r.Note,
 			&r.Status,
 			&r.CreatedAt,

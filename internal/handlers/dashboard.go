@@ -104,15 +104,15 @@ func dashboardHTML(user *models.User, friends []models.Profile, installments []m
 		email = handle + "@splitit.app"
 	}
 
-	var outstandingBNPL float64
+	var outstandingBNPLCents int
 	for _, inst := range installments {
 		if !inst.IsPaid {
-			outstandingBNPL += inst.Amount
+			outstandingBNPLCents += inst.AmountCents
 		}
 	}
-	availableCredit := user.CreditLimit - outstandingBNPL
-	if availableCredit < 0 {
-		availableCredit = 0
+	availableCreditCents := user.CreditLimitCents - outstandingBNPLCents
+	if availableCreditCents < 0 {
+		availableCreditCents = 0
 	}
 	scoreLabel := creditScoreLabel(user.CreditScore)
 	friendReqCount := len(friendRequests)
@@ -182,7 +182,7 @@ func dashboardHTML(user *models.User, friends []models.Profile, installments []m
       <div class="side-promo">
         <div class="promo-title">splitit Score</div>
         <div class="promo-score"><span class="mono">` + fmt.Sprintf("%d", user.CreditScore) + `</span><span class="promo-small">/100</span></div>
-        <div class="promo-sub">` + scoreLabel + ` · BNPL limit $` + fmt.Sprintf("%.0f", user.CreditLimit) + `</div>
+        <div class="promo-sub">` + scoreLabel + ` · BNPL limit $` + fmt.Sprintf("%d", user.CreditLimitCents/100) + `</div>
       </div>
     </aside>
 
@@ -214,7 +214,7 @@ func dashboardHTML(user *models.User, friends []models.Profile, installments []m
     </button>
   </nav>
 
-` + paySheetHTML(friends, availableCredit) + `
+` + paySheetHTML(friends, availableCreditCents) + `
 ` + requestSheetHTML(friends) + `
 ` + addFriendSheetHTML() + `
 ` + sessionContextScript(handle, friends) + `
@@ -909,13 +909,13 @@ func dashboardScript() string {
 
   // --- Send payment -------------------------------------------------------
   function submitSendPayment() {
-    var receiverID = document.getElementById('pay-receiver-sel').value;
-    var amount     = parseFloat(document.getElementById('pay-amount-inp').value || '0');
-    var note       = document.getElementById('pay-note-inp').value;
+    var receiverID   = document.getElementById('pay-receiver-sel').value;
+    var amountCents  = Math.round(parseFloat(document.getElementById('pay-amount-inp').value || '0') * 100);
+    var note         = document.getElementById('pay-note-inp').value;
     if (!receiverID) { showToast('Please select a recipient', 'warn'); return; }
-    if (amount <= 0) { showToast('Please enter a valid amount', 'warn'); return; }
+    if (amountCents <= 0) { showToast('Please enter a valid amount', 'warn'); return; }
     apiPost('/payments/pay',
-      { receiver_id: receiverID, amount: amount, note: note, payment_type: 'direct' },
+      { receiver_id: receiverID, amount_cents: amountCents, note: note, payment_type: 'direct' },
       function() { closeSheet('pay'); showToast('Payment sent'); setTimeout(function() { location.reload(); }, 1200); },
       function(e) { showToast(e, 'warn'); }
     );
@@ -923,14 +923,14 @@ func dashboardScript() string {
 
   // --- Create BNPL loan ---------------------------------------------------
   function submitBNPL() {
-    var receiverID = document.getElementById('bnpl-receiver-sel').value;
-    var amount     = parseFloat(document.getElementById('bnpl-amount-inp').value || '0');
-    var note       = document.getElementById('bnpl-note-inp').value;
-    var plan       = parseInt(document.getElementById('bnpl-plan-sel').value || '4', 10);
+    var receiverID  = document.getElementById('bnpl-receiver-sel').value;
+    var amountCents = Math.round(parseFloat(document.getElementById('bnpl-amount-inp').value || '0') * 100);
+    var note        = document.getElementById('bnpl-note-inp').value;
+    var plan        = parseInt(document.getElementById('bnpl-plan-sel').value || '4', 10);
     if (!receiverID) { showToast('Please select a recipient', 'warn'); return; }
-    if (amount <= 0) { showToast('Please enter a valid amount', 'warn'); return; }
+    if (amountCents <= 0) { showToast('Please enter a valid amount', 'warn'); return; }
     apiPost('/bnpl/loan/create',
-      { receiver_id: receiverID, amount: amount, note: note, payment_type: 'bnpl', total_installments: plan },
+      { receiver_id: receiverID, amount_cents: amountCents, note: note, payment_type: 'bnpl', total_installments: plan },
       function() { closeSheet('pay'); showToast('BNPL plan approved'); setTimeout(function() { location.reload(); }, 1200); },
       function(e) { showToast(e, 'warn'); }
     );
@@ -938,13 +938,13 @@ func dashboardScript() string {
 
   // --- Request money ------------------------------------------------------
   function submitRequest() {
-    var payerID = document.getElementById('req-payer-sel').value;
-    var amount  = parseFloat(document.getElementById('req-amount-inp').value || '0');
-    var note    = document.getElementById('req-note-inp').value;
+    var payerID     = document.getElementById('req-payer-sel').value;
+    var amountCents = Math.round(parseFloat(document.getElementById('req-amount-inp').value || '0') * 100);
+    var note        = document.getElementById('req-note-inp').value;
     if (!payerID) { showToast('Please select a friend', 'warn'); return; }
-    if (amount <= 0) { showToast('Please enter a valid amount', 'warn'); return; }
+    if (amountCents <= 0) { showToast('Please enter a valid amount', 'warn'); return; }
     apiPost('/payments/request/create',
-      { payer_id: payerID, amount: amount, note: note },
+      { payer_id: payerID, amount_cents: amountCents, note: note },
       function() { closeSheet('request'); showToast('Request sent'); },
       function(e) { showToast(e, 'warn'); }
     );
@@ -1127,9 +1127,9 @@ func dashboardScript() string {
   }
 
   // --- Pay single installment ---------------------------------------------
-  function payInstallment(installmentID, paymentID, amount) {
+  function payInstallment(installmentID, paymentID, amountCents) {
     apiPost('/bnpl/installment/pay',
-      { installment_id: installmentID, payment_id: paymentID, amount: amount },
+      { installment_id: installmentID, payment_id: paymentID, amount_cents: amountCents },
       function() { showToast('Installment paid'); setTimeout(function() { location.reload(); }, 1200); },
       function(e) { showToast(e, 'warn'); }
     );
@@ -1141,14 +1141,14 @@ func dashboardScript() string {
     if (!rows.length) { showToast('No overdue installments'); return; }
     var pending = rows.length, failed = 0;
     rows.forEach(function(row) {
-      var iid = row.getAttribute('data-installment-id');
-      var pid = row.getAttribute('data-payment-id');
-      var amt = parseFloat(row.getAttribute('data-amount') || '0');
+      var iid        = row.getAttribute('data-installment-id');
+      var pid        = row.getAttribute('data-payment-id');
+      var amtCents   = parseInt(row.getAttribute('data-amount-cents') || '0', 10);
       fetch('/bnpl/installment/pay', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
-        body: JSON.stringify({ installment_id: iid, payment_id: pid, amount: amt })
+        body: JSON.stringify({ installment_id: iid, payment_id: pid, amount_cents: amtCents })
       })
       .then(function(res) { if (!res.ok) failed++; })
       .catch(function() { failed++; })

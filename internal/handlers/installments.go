@@ -65,10 +65,10 @@ func (h *Handler) PayInstallment(w http.ResponseWriter, r *http.Request) {
 
 	// Initialize a custom, empty struct to hold the incoming data
 	type Input struct {
-		InstallmentID string  `json:"installment_id"`
-		PaymentID     string  `json:"payment_id"`
-		UserID        string  `json:"user_id"`
-		Amount        float64 `json:"amount"`
+		InstallmentID string `json:"installment_id"`
+		PaymentID     string `json:"payment_id"`
+		UserID        string `json:"user_id"`
+		AmountCents   int    `json:"amount_cents"`
 	}
 	var input Input
 
@@ -83,7 +83,7 @@ func (h *Handler) PayInstallment(w http.ResponseWriter, r *http.Request) {
 	input.UserID = sessionID
 
 	// Pass the populated struct down to the database engine
-	err = h.store.PayInstallment(input.InstallmentID, input.PaymentID, input.UserID, input.Amount)
+	err = h.store.PayInstallment(input.InstallmentID, input.PaymentID, input.UserID, input.AmountCents)
 	if err != nil {
 		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
@@ -152,14 +152,14 @@ func viewHome(name string, user *models.User, overdueInstallments []models.Insta
 		greet = firstName[0]
 	}
 
-	balanceWhole := int(user.Balance)
-	balanceCents := int((user.Balance-float64(balanceWhole))*100 + 0.5)
+	balanceWhole := user.BalanceCents / 100
+	balanceCentsFrac := user.BalanceCents % 100
 
-	var outstandingBNPL float64
+	var outstandingBNPLCents int
 	splitIDs := make(map[string]struct{})
 	for _, inst := range installments {
 		if !inst.IsPaid {
-			outstandingBNPL += inst.Amount
+			outstandingBNPLCents += inst.AmountCents
 			splitIDs[inst.PaymentID] = struct{}{}
 		}
 	}
@@ -212,7 +212,7 @@ func viewHome(name string, user *models.User, overdueInstallments []models.Insta
         <div class="row-title"><b>@` + req.RequesterID + `</b> requested from <b>you</b></div>
         <div class="row-sub">` + req.Note + `</div>
       </div>
-      <div class="row-right"><div class="row-amt req mono">$` + fmt.Sprintf("%.2f", req.Amount) + `</div><div class="row-time">` + date + `</div></div>
+      <div class="row-right"><div class="row-amt req mono">$` + fmt.Sprintf("%d.%02d", req.AmountCents/100, req.AmountCents%100) + `</div><div class="row-time">` + date + `</div></div>
     </div>`
 		count++
 	}
@@ -234,7 +234,7 @@ func viewHome(name string, user *models.User, overdueInstallments []models.Insta
         <div class="row-title"><b>BNPL</b> installment <span class="pill">Pay-in-4</span></div>
         <div class="row-sub">` + statusLabel + `</div>
       </div>
-      <div class="row-right"><div class="row-amt ` + amtClass + ` mono">$` + fmt.Sprintf("%.2f", inst.Amount) + `</div><div class="row-time">` + inst.DueDate + `</div></div>
+      <div class="row-right"><div class="row-amt ` + amtClass + ` mono">$` + fmt.Sprintf("%d.%02d", inst.AmountCents/100, inst.AmountCents%100) + `</div><div class="row-time">` + inst.DueDate + `</div></div>
     </div>`
 		count++
 	}
@@ -249,9 +249,9 @@ func viewHome(name string, user *models.User, overdueInstallments []models.Insta
 
   <div class="hero">
     <div class="hero-label">Available balance</div>
-    <div class="hero-amount mono">$` + fmt.Sprintf("%d", balanceWhole) + `<span class="cents">.` + fmt.Sprintf("%02d", balanceCents) + `</span></div>
+    <div class="hero-amount mono">$` + fmt.Sprintf("%d", balanceWhole) + `<span class="cents">.` + fmt.Sprintf("%02d", balanceCentsFrac) + `</span></div>
     <div class="hero-meta">
-      <span><b>$` + fmt.Sprintf("%.2f", outstandingBNPL) + `</b> outstanding</span>
+      <span><b>$` + fmt.Sprintf("%d.%02d", outstandingBNPLCents/100, outstandingBNPLCents%100) + `</b> outstanding</span>
       <span style="opacity:.4;">·</span>
       <span><b>` + fmt.Sprintf("%d", activeSplits) + `</b> active splits</span>
     </div>
@@ -325,7 +325,7 @@ func viewActivity(installments []models.Installment, overdueInstallments []model
       <div class="row">
         <div class="row-avatar ` + cls + `">` + ini + `</div>
         <div class="row-body"><div class="row-title"><b>@` + req.RequesterID + `</b> requested</div><div class="row-sub">` + statusLabel + `</div></div>
-        <div class="row-right"><div class="row-amt req mono">$` + fmt.Sprintf("%.2f", req.Amount) + `</div><div class="row-time">` + date + `</div></div>
+        <div class="row-right"><div class="row-amt req mono">$` + fmt.Sprintf("%d.%02d", req.AmountCents/100, req.AmountCents%100) + `</div><div class="row-time">` + date + `</div></div>
       </div>`
 	}
 	if paymentsRows == "" {
@@ -348,7 +348,7 @@ func viewActivity(installments []models.Installment, overdueInstallments []model
           <div class="row-sub">Due ` + inst.DueDate + `</div>
           <div class="progress"><span style="width:50%;"></span></div>
         </div>
-        <div class="row-right"><div class="row-amt bnpl mono">$` + fmt.Sprintf("%.2f", inst.Amount) + `</div><div class="row-time">/installment</div></div>
+        <div class="row-right"><div class="row-amt bnpl mono">$` + fmt.Sprintf("%d.%02d", inst.AmountCents/100, inst.AmountCents%100) + `</div><div class="row-time">/installment</div></div>
       </div>`
 		activeIdx++
 	}
@@ -374,15 +374,15 @@ func viewActivity(installments []models.Installment, overdueInstallments []model
       <div class="empty-sub">No overdue bills. Your Splitit Score is safe.</div>
     </div>`
 	} else {
-		var overdueTotal float64
+		var overdueTotalCents int
 		for _, inst := range overdueInstallments {
-			overdueTotal += inst.Amount
+			overdueTotalCents += inst.AmountCents
 		}
 		overdueRows := ""
 		for i, inst := range overdueInstallments {
 			_ = i
 			overdueRows += `
-        <div class="row overdue-row" data-installment-id="` + inst.ID + `" data-payment-id="` + inst.PaymentID + `" data-amount="` + fmt.Sprintf("%.2f", inst.Amount) + `">
+        <div class="row overdue-row" data-installment-id="` + inst.ID + `" data-payment-id="` + inst.PaymentID + `" data-amount-cents="` + fmt.Sprintf("%d", inst.AmountCents) + `">
           <div class="row-avatar av-rose">OD</div>
           <div class="row-body">
             <div class="row-title"><b>BNPL installment</b> <span class="pill warn">Overdue</span></div>
@@ -390,9 +390,9 @@ func viewActivity(installments []models.Installment, overdueInstallments []model
             <div class="progress warn"><span style="width:25%;"></span></div>
           </div>
           <div class="row-right">
-            <button onclick="payInstallment('` + inst.ID + `','` + inst.PaymentID + `',` + fmt.Sprintf("%.2f", inst.Amount) + `)"
+            <button onclick="payInstallment('` + inst.ID + `','` + inst.PaymentID + `',` + fmt.Sprintf("%d", inst.AmountCents) + `)"
               style="background:var(--rose);color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">
-              Pay $` + fmt.Sprintf("%.2f", inst.Amount) + `
+              Pay $` + fmt.Sprintf("%d.%02d", inst.AmountCents/100, inst.AmountCents%100) + `
             </button>
           </div>
         </div>`
@@ -401,7 +401,7 @@ func viewActivity(installments []models.Installment, overdueInstallments []model
     <div class="overdue-banner">
       <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
       <div class="ob-text">
-        <strong>$` + fmt.Sprintf("%.2f", overdueTotal) + ` overdue across ` + fmt.Sprintf("%d", len(overdueInstallments)) + ` bills</strong>
+        <strong>$` + fmt.Sprintf("%d.%02d", overdueTotalCents/100, overdueTotalCents%100) + ` overdue across ` + fmt.Sprintf("%d", len(overdueInstallments)) + ` bills</strong>
         <div>Late fees may apply. Pay now to keep your Splitit Score intact.</div>
       </div>
       <button onclick="payAllOverdue()">Pay all</button>

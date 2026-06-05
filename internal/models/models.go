@@ -4,16 +4,16 @@ import "time"
 
 // User represents a registered account holder with financial and identity attributes.
 type User struct {
-	ID           string  `json:"id"`
-	PasswordHash string  `json:"-"`
-	Name         string  `json:"name"`
-	Email        string  `json:"email"`
-	PhoneNumber  string  `json:"phone_number"`
-	Balance      float64 `json:"balance"`
-	CreditScore  uint8   `json:"credit_score"`
-	CreditLimit  float64 `json:"credit_limit"`
-	IsActive     bool    `json:"is_active"`
-	CreatedAt    string  `json:"created_at"`
+	ID              string `json:"id"`
+	PasswordHash    string `json:"-"`
+	Name            string `json:"name"`
+	Email           string `json:"email"`
+	PhoneNumber     string `json:"phone_number"`
+	BalanceCents    int    `json:"balance_cents"`
+	CreditScore     uint8  `json:"credit_score"`
+	CreditLimitCents int   `json:"credit_limit_cents"`
+	IsActive        bool   `json:"is_active"`
+	CreatedAt       string `json:"created_at"`
 }
 
 // Profile is the public-facing subset of a User, safe to expose to other users.
@@ -27,16 +27,16 @@ type Profile struct {
 
 // Payment records a single monetary transfer between two accounts, including BNPL master loan records.
 type Payment struct {
-	ID                string  `json:"id"`
-	SenderID          string  `json:"sender_id"`
-	ReceiverID        string  `json:"receiver_id"`
-	Amount            float64 `json:"amount"`
-	TotalAmount       float64 `json:"total_amount"`
-	Note              string  `json:"note"`
-	PaymentType       string  `json:"payment_type"`
-	TotalInstallments uint8   `json:"total_installments"`
-	Status            string  `json:"status"`
-	CreatedAt         string  `json:"created_at"`
+	ID                string `json:"id"`
+	SenderID          string `json:"sender_id"`
+	ReceiverID        string `json:"receiver_id"`
+	AmountCents       int    `json:"amount_cents"`
+	TotalAmountCents  int    `json:"total_amount_cents"`
+	Note              string `json:"note"`
+	PaymentType       string `json:"payment_type"`
+	TotalInstallments uint8  `json:"total_installments"`
+	Status            string `json:"status"`
+	CreatedAt         string `json:"created_at"`
 }
 
 // PaymentWithInstallments bundles a master payment record with its full installment schedule.
@@ -47,24 +47,24 @@ type PaymentWithInstallments struct {
 
 // PaymentRequest represents a pending demand from one user asking another to send money.
 type PaymentRequest struct {
-	ID          string  `json:"id"`
-	RequesterID string  `json:"requester_id"`
-	PayerID     string  `json:"payer_id"`
-	Amount      float64 `json:"amount"`
-	Note        string  `json:"note"`
-	Status      string  `json:"status"`
-	CreatedAt   string  `json:"created_at"`
+	ID          string `json:"id"`
+	RequesterID string `json:"requester_id"`
+	PayerID     string `json:"payer_id"`
+	AmountCents int    `json:"amount_cents"`
+	Note        string `json:"note"`
+	Status      string `json:"status"`
+	CreatedAt   string `json:"created_at"`
 }
 
 // Installment represents a single scheduled repayment slice within a BNPL loan plan.
 type Installment struct {
-	ID           string  `json:"id"`
-	PaymentID    string  `json:"payment_id"`
-	UserWithDebt string  `json:"user_id"`
-	Amount       float64 `json:"amount"`
-	DueDate      string  `json:"due_date"`
-	IsPaid       bool    `json:"is_paid"`
-	CreatedAt    string  `json:"created_at"`
+	ID           string `json:"id"`
+	PaymentID    string `json:"payment_id"`
+	UserWithDebt string `json:"user_id"`
+	AmountCents  int    `json:"amount_cents"`
+	DueDate      string `json:"due_date"`
+	IsPaid       bool   `json:"is_paid"`
+	CreatedAt    string `json:"created_at"`
 }
 
 // FriendRequest represents a pending social connection request between two users.
@@ -122,24 +122,24 @@ type UserSettings struct {
 
 // SpendingTotals aggregates directional cash flow metrics across a bounded time window for a single account.
 type SpendingTotals struct {
-	TotalSent     float64 `json:"total_sent"`
-	TotalReceived float64 `json:"total_received"`
-	Net           float64 `json:"net"`
+	TotalSentCents     int `json:"total_sent_cents"`
+	TotalReceivedCents int `json:"total_received_cents"`
+	NetCents           int `json:"net_cents"`
 }
 
 // MonthlySummary captures aggregated financial activity for a single calendar billing month.
 type MonthlySummary struct {
-	Year              int        `json:"year"`
-	Month             time.Month `json:"month"`
-	TotalOut          float64    `json:"total_out"`
-	TotalIn           float64    `json:"total_in"`
-	ActiveBNPLCharges float64    `json:"active_bnpl_charges"`
+	Year                   int        `json:"year"`
+	Month                  time.Month `json:"month"`
+	TotalOutCents          int        `json:"total_out_cents"`
+	TotalInCents           int        `json:"total_in_cents"`
+	ActiveBNPLChargesCents int        `json:"active_bnpl_charges_cents"`
 }
 
 // TopRecipient pairs a peer identity with the total volume of funds directed toward them.
 type TopRecipient struct {
-	Profile   Profile `json:"profile"`
-	TotalSent float64 `json:"total_sent"`
+	Profile        Profile `json:"profile"`
+	TotalSentCents int     `json:"total_sent_cents"`
 }
 
 // CreditScoreLog records a single audit checkpoint in a user's credit score history.
@@ -154,9 +154,9 @@ type CreditScoreLog struct {
 
 // InstallmentSummary provides a consolidated snapshot of a user's installment plan portfolio.
 type InstallmentSummary struct {
-	TotalSettled     float64 `json:"total_settled"`
-	TotalOutstanding float64 `json:"total_outstanding"`
-	TotalOverdue     float64 `json:"total_overdue"`
+	TotalSettledCents     int `json:"total_settled_cents"`
+	TotalOutstandingCents int `json:"total_outstanding_cents"`
+	TotalOverdueCents     int `json:"total_overdue_cents"`
 }
 
 // LinkedCard represents a tokenized external funding instrument registered to a user account.
@@ -174,9 +174,9 @@ type LinkedCard struct {
 // WalletTransaction records an absolute balance mutation event (deposit or withdrawal) on a user account.
 // Distinct from peer-to-peer Payment records in the payments ledger.
 type WalletTransaction struct {
-	ID        string  `json:"id"`
-	UserID    string  `json:"user_id"`
-	Type      string  `json:"type"` // "deposit" | "withdrawal"
-	Amount    float64 `json:"amount"`
-	CreatedAt string  `json:"created_at"`
+	ID          string `json:"id"`
+	UserID      string `json:"user_id"`
+	Type        string `json:"type"` // "deposit" | "withdrawal"
+	AmountCents int    `json:"amount_cents"`
+	CreatedAt   string `json:"created_at"`
 }

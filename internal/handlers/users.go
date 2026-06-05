@@ -52,14 +52,14 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 
 	// Map the form input data over to the structural Database model
 	new_user := models.User{
-		ID:           input.ID,
-		PasswordHash: string(hashedPassword),
-		Name:         input.Name,
-		Email:        input.Email,
-		PhoneNumber:  input.PhoneNumber,
-		Balance:      0.00,
-		CreditScore:  50,
-		CreditLimit:  1000.00,
+		ID:               input.ID,
+		PasswordHash:     string(hashedPassword),
+		Name:             input.Name,
+		Email:            input.Email,
+		PhoneNumber:      input.PhoneNumber,
+		BalanceCents:     0,
+		CreditScore:      50,
+		CreditLimitCents: 100000,
 	}
 
 	// Pass the populated struct down to the database engine
@@ -447,20 +447,20 @@ func viewProfile(user *models.User, avatar, name, handle, email, phone string, f
 	scoreLabel := creditScoreLabel(score)
 	scoreWidth := fmt.Sprintf("%d%%", score)
 
-	var outstandingBNPL float64
+	var outstandingBNPLCents int
 	activeSplits := make(map[string]struct{})
 	for _, inst := range installments {
 		if !inst.IsPaid {
-			outstandingBNPL += inst.Amount
+			outstandingBNPLCents += inst.AmountCents
 			activeSplits[inst.PaymentID] = struct{}{}
 		}
 	}
-	availableCredit := user.CreditLimit - outstandingBNPL
-	if availableCredit < 0 {
-		availableCredit = 0
+	availableCreditCents := user.CreditLimitCents - outstandingBNPLCents
+	if availableCreditCents < 0 {
+		availableCreditCents = 0
 	}
 
-	balanceWhole := int(user.Balance)
+	balanceWhole := user.BalanceCents / 100
 
 	return `
 <section class="view" data-view="profile">
@@ -483,11 +483,11 @@ func viewProfile(user *models.User, avatar, name, handle, email, phone string, f
     <div style="display:flex; justify-content:space-between; margin-top:14px; padding-top:14px; border-top:1px solid rgba(255,255,255,0.06);">
       <div>
         <div style="font-size:11px; color:var(--text-mute); text-transform:uppercase; letter-spacing:0.05em; font-weight:600;">BNPL limit</div>
-        <div class="mono" style="font-size:18px; font-weight:700; color:var(--emerald-hi); margin-top:4px;">$` + fmt.Sprintf("%.2f", user.CreditLimit) + `</div>
+        <div class="mono" style="font-size:18px; font-weight:700; color:var(--emerald-hi); margin-top:4px;">$` + fmt.Sprintf("%d.%02d", user.CreditLimitCents/100, user.CreditLimitCents%100) + `</div>
       </div>
       <div style="text-align:right;">
         <div style="font-size:11px; color:var(--text-mute); text-transform:uppercase; letter-spacing:0.05em; font-weight:600;">Available</div>
-        <div class="mono" style="font-size:18px; font-weight:700; color:var(--text); margin-top:4px;">$` + fmt.Sprintf("%.2f", availableCredit) + `</div>
+        <div class="mono" style="font-size:18px; font-weight:700; color:var(--text); margin-top:4px;">$` + fmt.Sprintf("%d.%02d", availableCreditCents/100, availableCreditCents%100) + `</div>
       </div>
     </div>
   </div>

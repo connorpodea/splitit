@@ -14,30 +14,30 @@ func (s *Store) GetSpendingTotals(userID string, since time.Time) (*models.Spend
 	sinceStr := since.Format("2006-01-02")
 
 	// Single-pass query: Sums up 'sent' vs 'received' amounts using conditional CASE statements.
-	// COALESCE wraps the sums to guarantee a 0.0 fallback instead of a database NULL.
+	// COALESCE wraps the sums to guarantee a 0 fallback instead of a database NULL.
 	query := `
-    SELECT 
-    COALESCE(SUM(CASE WHEN sender_id = ? THEN amount ELSE 0 END), 0.0) AS total_sent,
-    COALESCE(SUM(CASE WHEN receiver_id = ? THEN amount ELSE 0 END), 0.0) AS total_received
+    SELECT
+    COALESCE(SUM(CASE WHEN sender_id = ? THEN amount_cents ELSE 0 END), 0) AS total_sent_cents,
+    COALESCE(SUM(CASE WHEN receiver_id = ? THEN amount_cents ELSE 0 END), 0) AS total_received_cents
     FROM payments
     WHERE (sender_id = ? OR receiver_id = ?) AND created_at >= ?;`
 
-	var totalSent float64
-	var totalReceived float64
+	var totalSentCents int
+	var totalReceivedCents int
 
-	err := s.db.QueryRow(query, userID, userID, userID, userID, sinceStr).Scan(&totalSent, &totalReceived)
+	err := s.db.QueryRow(query, userID, userID, userID, userID, sinceStr).Scan(&totalSentCents, &totalReceivedCents)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute financial volume aggregation scenario for user '%s': %w", userID, err)
 	}
 
 	// Compute net cash flow
-	netFlow := totalReceived - totalSent
+	netCents := totalReceivedCents - totalSentCents
 
 	// Instantiate the return struct
 	spendingTotals := models.SpendingTotals{
-		TotalSent:     totalSent,
-		TotalReceived: totalReceived,
-		Net:           netFlow,
+		TotalSentCents:     totalSentCents,
+		TotalReceivedCents: totalReceivedCents,
+		NetCents:           netCents,
 	}
 
 	return &spendingTotals, nil
@@ -47,7 +47,7 @@ func (s *Store) GetSpendingTotals(userID string, since time.Time) (*models.Spend
 // containing both inbound and outbound payments for use in an activity feed view.
 func (s *Store) ListPaymentsByUser(userID string) ([]models.Payment, error) {
 	query := `
-    SELECT id, sender_id, receiver_id, amount, total_amount, note, payment_type, total_installments, status, created_at
+    SELECT id, sender_id, receiver_id, amount_cents, total_amount_cents, note, payment_type, total_installments, status, created_at
     FROM payments
     WHERE sender_id = ? OR receiver_id = ?
     ORDER BY created_at DESC;`
@@ -67,8 +67,8 @@ func (s *Store) ListPaymentsByUser(userID string) ([]models.Payment, error) {
 			&p.ID,
 			&p.SenderID,
 			&p.ReceiverID,
-			&p.Amount,
-			&p.TotalAmount,
+			&p.AmountCents,
+			&p.TotalAmountCents,
 			&p.Note,
 			&p.PaymentType,
 			&p.TotalInstallments,
@@ -93,7 +93,7 @@ func (s *Store) ListPaymentsByUser(userID string) ([]models.Payment, error) {
 // between two specific user identities.
 func (s *Store) ListPaymentsBetweenUsers(userID, otherID string) ([]models.Payment, error) {
 	query := `
-    SELECT id, sender_id, receiver_id, amount, total_amount, note, payment_type, total_installments, status, created_at
+    SELECT id, sender_id, receiver_id, amount_cents, total_amount_cents, note, payment_type, total_installments, status, created_at
     FROM payments
     WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)
     ORDER BY created_at DESC;` // Explicit grouping guarantees safety if filters are added later
@@ -113,8 +113,8 @@ func (s *Store) ListPaymentsBetweenUsers(userID, otherID string) ([]models.Payme
 			&p.ID,
 			&p.SenderID,
 			&p.ReceiverID,
-			&p.Amount,
-			&p.TotalAmount,
+			&p.AmountCents,
+			&p.TotalAmountCents,
 			&p.Note,
 			&p.PaymentType,
 			&p.TotalInstallments,
@@ -136,10 +136,10 @@ func (s *Store) ListPaymentsBetweenUsers(userID, otherID string) ([]models.Payme
 }
 
 // Deposit credits the specified amount to a user's available cash balance.
-func (s *Store) Deposit(userID string, amount float64) error {
+func (s *Store) Deposit(userID string, amountCents int) error {
 	query := `
 	UPDATE users
-	SET balance = balance + ?
+	SET balance_cents = balance_cents + ?
 	WHERE id = ?;`
 
 	transaction, err := s.db.Begin()
@@ -148,9 +148,9 @@ func (s *Store) Deposit(userID string, amount float64) error {
 	}
 	defer transaction.Rollback()
 
-	result, err := transaction.Exec(query, amount, userID)
+	result, err := transaction.Exec(query, amountCents, userID)
 	if err != nil {
-		return fmt.Errorf("failed to clear balance deposit allocation of $%.2f for user ID '%s': %w", amount, userID, err)
+		return fmt.Errorf("failed to clear balance deposit allocation of %d cents for user ID '%s': %w", amountCents, userID, err)
 	}
 
 	rowsAffected, err := result.RowsAffected()
@@ -169,10 +169,10 @@ func (s *Store) Deposit(userID string, amount float64) error {
 }
 
 // Withdraw debits the specified amount from a user's cash balance after liquid funds verification.
-func (s *Store) Withdraw(userID string, amount float64) error {
+func (s *Store) Withdraw(userID string, amountCents int) error {
 	query := `
 	UPDATE users
-	SET balance = balance - ?
+	SET balance_cents = balance_cents - ?
 	WHERE id = ?;`
 
 	transaction, err := s.db.Begin()
@@ -181,9 +181,9 @@ func (s *Store) Withdraw(userID string, amount float64) error {
 	}
 	defer transaction.Rollback()
 
-	result, err := transaction.Exec(query, amount, userID)
+	result, err := transaction.Exec(query, amountCents, userID)
 	if err != nil {
-		return fmt.Errorf("failed to clear balance withdraw allocation of $%.2f for user ID '%s': %w", amount, userID, err)
+		return fmt.Errorf("failed to clear balance withdraw allocation of %d cents for user ID '%s': %w", amountCents, userID, err)
 	}
 
 	rowsAffected, err := result.RowsAffected()

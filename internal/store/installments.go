@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"math"
 	"time"
 
 	"github.com/connorpodea/splitit/internal/models"
@@ -28,12 +27,12 @@ func (s *Store) CreateBNPLLoan(payment *models.Payment) error {
 	if err != nil {
 		return fmt.Errorf("credit engine evaluation rejected: failed to query credit profile for buyer ID '%s': %w", payment.SenderID, err)
 	}
-	if payment.TotalAmount > sender.CreditLimit {
-		return fmt.Errorf("credit engine rejected: requested loan amount of $%.2f exceeds available credit limit of $%.2f for buyer ID '%s'", payment.TotalAmount, sender.CreditLimit, payment.SenderID)
+	if payment.TotalAmountCents > sender.CreditLimitCents {
+		return fmt.Errorf("credit engine rejected: requested loan amount of %d cents exceeds available credit limit of %d cents for buyer ID '%s'", payment.TotalAmountCents, sender.CreditLimitCents, payment.SenderID)
 	}
 
 	// Variable for the raw price before fees
-	itemPrice := payment.TotalAmount
+	itemPriceCents := payment.TotalAmountCents
 
 	var feeRate float64 = 0.00
 	// Calculate the risk fee based on their credit health score iff they are paying over time
@@ -41,38 +40,36 @@ func (s *Store) CreateBNPLLoan(payment *models.Payment) error {
 		feeRate = s.CalculateFeeRate(sender.CreditScore)
 	}
 
-	// Update the senders purchase amount by the fee rate
-	totalDebt := itemPrice + (feeRate * itemPrice)
+	// Update the purchase amount by the fee rate
+	totalDebtCents := itemPriceCents + int(feeRate*float64(itemPriceCents))
 
-	baseAmount := math.Floor((totalDebt/float64(payment.TotalInstallments))*100) / 100
-
-	// Calculate the leftover pennies to add to initial installment
-	remainder := totalDebt - (baseAmount * float64(payment.TotalInstallments))
+	baseAmountCents := totalDebtCents / int(payment.TotalInstallments) // integer division; remainder distributed to first installment
+	remainderCents := totalDebtCents - (baseAmountCents * int(payment.TotalInstallments))
 
 	// Step 1: Insert the master loan record to preserve historical data integrity before any fund movements
 	// This anchors the loan in the payments table without touching balances directly
-	payment.TotalAmount = totalDebt
-	payment.Amount = itemPrice
+	payment.TotalAmountCents = totalDebtCents
+	payment.AmountCents = itemPriceCents
 	payment.PaymentType = "bnpl_loan_master"
 
 	query := `
 	INSERT INTO payments
-	(id, sender_id, receiver_id, amount, total_amount, note, payment_type, total_installments, status)
+	(id, sender_id, receiver_id, amount_cents, total_amount_cents, note, payment_type, total_installments, status)
 	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`
 
-	_, err = s.db.Exec(query, payment.ID, payment.SenderID, payment.ReceiverID, payment.Amount, payment.TotalAmount, payment.Note, payment.PaymentType, payment.TotalInstallments, payment.Status)
+	_, err = s.db.Exec(query, payment.ID, payment.SenderID, payment.ReceiverID, payment.AmountCents, payment.TotalAmountCents, payment.Note, payment.PaymentType, payment.TotalInstallments, payment.Status)
 	if err != nil {
 		return fmt.Errorf("loan processing aborted: failed to anchor master loan record ID '%s' into payments ledger: %w", payment.ID, err)
 	}
 
 	creditQuery := `
 	UPDATE users
-	SET credit_limit = credit_limit - ?
+	SET credit_limit_cents = credit_limit_cents - ?
 	WHERE id = ?;`
 
-	_, err = s.db.Exec(creditQuery, itemPrice, payment.SenderID)
+	_, err = s.db.Exec(creditQuery, itemPriceCents, payment.SenderID)
 	if err != nil {
-		return fmt.Errorf("loan processing aborted: failed to deduct $%.2f from credit limit for buyer ID '%s': %w", itemPrice, payment.SenderID, err)
+		return fmt.Errorf("loan processing aborted: failed to deduct %d cents from credit limit for buyer ID '%s': %w", itemPriceCents, payment.SenderID, err)
 	}
 
 	// Step 2: Pay the Merchant — the app treasury injects the full item price to the seller immediately
@@ -80,8 +77,8 @@ func (s *Store) CreateBNPLLoan(payment *models.Payment) error {
 		ID:                fmt.Sprintf("fund_%s", payment.ID),
 		SenderID:          "app_treasury",
 		ReceiverID:        payment.ReceiverID,
-		Amount:            itemPrice,
-		TotalAmount:       itemPrice,
+		AmountCents:       itemPriceCents,
+		TotalAmountCents:  itemPriceCents,
 		PaymentType:       "treasury_funding",
 		TotalInstallments: 1,
 		Status:            "completed",
@@ -98,8 +95,8 @@ func (s *Store) CreateBNPLLoan(payment *models.Payment) error {
 		ID:                fmt.Sprintf("down_%s", payment.ID),
 		SenderID:          payment.SenderID,
 		ReceiverID:        "app_treasury",
-		Amount:            baseAmount + remainder,
-		TotalAmount:       baseAmount + remainder,
+		AmountCents:       baseAmountCents + remainderCents,
+		TotalAmountCents:  baseAmountCents + remainderCents,
 		PaymentType:       "installment",
 		TotalInstallments: 1,
 		Status:            "completed",
@@ -115,17 +112,17 @@ func (s *Store) CreateBNPLLoan(payment *models.Payment) error {
 	currentTime := time.Now()
 
 	for i := uint8(1); i <= payment.TotalInstallments; i++ {
-		var installmentAmount float64
+		var installmentAmountCents int
 		var isPaid bool
 		var dueDate time.Time
 
 		if i == 1 {
 			// Installment 1 is paid upfront during s.Pay(downPayment)
-			installmentAmount = baseAmount + remainder
+			installmentAmountCents = baseAmountCents + remainderCents
 			isPaid = true
 			dueDate = currentTime
 		} else {
-			installmentAmount = baseAmount
+			installmentAmountCents = baseAmountCents
 			isPaid = false
 			// Stagger deadlines by 7 days multiplied by the installment index
 			dueDate = currentTime.AddDate(0, 0, int(i-1)*7)
@@ -140,10 +137,10 @@ func (s *Store) CreateBNPLLoan(payment *models.Payment) error {
 		}
 
 		installmentQuery := `
-		INSERT INTO installments 
-		(id, payment_id, user_id, amount, due_date, is_paid)
+		INSERT INTO installments
+		(id, payment_id, user_id, amount_cents, due_date, is_paid)
 		VALUES (?,?,?,?,?,?);`
-		_, err = s.db.Exec(installmentQuery, installmentID, payment.ID, payment.SenderID, installmentAmount, dueDate.Format("2006-01-02"), isPaidInt)
+		_, err = s.db.Exec(installmentQuery, installmentID, payment.ID, payment.SenderID, installmentAmountCents, dueDate.Format("2006-01-02"), isPaidInt)
 		if err != nil {
 			return fmt.Errorf("failed to save generated installment row segment %d for loan ID '%s' into database schedules: %w", i, payment.ID, err)
 		}
@@ -170,7 +167,7 @@ func (s *Store) CalculateFeeRate(creditScore uint8) float64 {
 // PayInstallment settles a single installment payment: verifies buyer funds, deducts the balance,
 // credits the treasury, marks the installment paid, adjusts the credit score for on-time or late
 // payment, and closes the loan if all installments are now cleared — all in one atomic transaction.
-func (s *Store) PayInstallment(installmentID, paymentID, userID string, amount float64) error {
+func (s *Store) PayInstallment(installmentID, paymentID, userID string, amountCents int) error {
 	transaction, err := s.db.Begin()
 	if err != nil {
 		return fmt.Errorf("installment settlement aborted: failed to open transaction session context: %w", err)
@@ -179,29 +176,29 @@ func (s *Store) PayInstallment(installmentID, paymentID, userID string, amount f
 	defer transaction.Rollback()
 
 	// Block the buyer from going into negative balance
-	var currentBalance float64
+	var currentBalanceCents int
 	balanceQuery := `
-	SELECT balance
+	SELECT balance_cents
 	FROM users
 	WHERE id = ?;`
 
-	err = transaction.QueryRow(balanceQuery, userID).Scan(&currentBalance)
+	err = transaction.QueryRow(balanceQuery, userID).Scan(&currentBalanceCents)
 	if err != nil {
 		return fmt.Errorf("installment settlement failed: unable to verify buyer funds for user ID '%s': %w", userID, err)
 	}
-	if currentBalance < amount {
-		return fmt.Errorf("installment settlement rejected: insufficient liquid funds (ID: '%s' attempted to pay $%.2f but only has $%.2f)", userID, amount, currentBalance)
+	if currentBalanceCents < amountCents {
+		return fmt.Errorf("installment settlement rejected: insufficient liquid funds (ID: '%s' attempted to pay %d cents but only has %d cents)", userID, amountCents, currentBalanceCents)
 	}
 
 	// Deduct the installment amount from the buyer and credit the treasury
 	deductQuery := `
 	UPDATE users
-	SET balance = balance - ?
+	SET balance_cents = balance_cents - ?
 	WHERE id = ?;`
 
-	deductResult, err := transaction.Exec(deductQuery, amount, userID)
+	deductResult, err := transaction.Exec(deductQuery, amountCents, userID)
 	if err != nil {
-		return fmt.Errorf("installment settlement failed: unable to deduct $%.2f from buyer ID '%s': %w", amount, userID, err)
+		return fmt.Errorf("installment settlement failed: unable to deduct %d cents from buyer ID '%s': %w", amountCents, userID, err)
 	}
 	deductRows, err := deductResult.RowsAffected()
 	if err != nil {
@@ -213,12 +210,12 @@ func (s *Store) PayInstallment(installmentID, paymentID, userID string, amount f
 
 	creditQuery := `
 	UPDATE users
-	SET balance = balance + ?
+	SET balance_cents = balance_cents + ?
 	WHERE id = ?;`
 
-	creditResult, err := transaction.Exec(creditQuery, amount, "app_treasury")
+	creditResult, err := transaction.Exec(creditQuery, amountCents, "app_treasury")
 	if err != nil {
-		return fmt.Errorf("installment settlement failed: unable to credit $%.2f to treasury: %w", amount, err)
+		return fmt.Errorf("installment settlement failed: unable to credit %d cents to treasury: %w", amountCents, err)
 	}
 	creditRows, err := creditResult.RowsAffected()
 	if err != nil {
@@ -302,25 +299,25 @@ func (s *Store) PayInstallment(installmentID, paymentID, userID string, amount f
 
 	// If all installments are cleared, restore the full loan amount back to the buyer's credit limit and mark the master loan record as completed
 	if unpaidCount == 0 {
-		var loanAmount float64
+		var loanAmountCents int
 		loanAmountQuery := `
-		SELECT amount
+		SELECT amount_cents
 		FROM payments
 		WHERE id = ?;`
 
-		err = transaction.QueryRow(loanAmountQuery, paymentID).Scan(&loanAmount)
+		err = transaction.QueryRow(loanAmountQuery, paymentID).Scan(&loanAmountCents)
 		if err != nil {
 			return fmt.Errorf("installment settlement failed: unable to retrieve original loan amount for credit limit restoration on loan ID '%s': %w", paymentID, err)
 		}
 
 		restoreQuery := `
 		UPDATE users
-		SET credit_limit = credit_limit + ?
+		SET credit_limit_cents = credit_limit_cents + ?
 		WHERE id = ?;`
 
-		restoreResult, err := transaction.Exec(restoreQuery, loanAmount, userID)
+		restoreResult, err := transaction.Exec(restoreQuery, loanAmountCents, userID)
 		if err != nil {
-			return fmt.Errorf("installment settlement failed: unable to restore $%.2f to credit limit for user ID '%s': %w", loanAmount, userID, err)
+			return fmt.Errorf("installment settlement failed: unable to restore %d cents to credit limit for user ID '%s': %w", loanAmountCents, userID, err)
 		}
 		restoreRows, err := restoreResult.RowsAffected()
 		if err != nil {
@@ -357,7 +354,7 @@ func (s *Store) PayInstallment(installmentID, paymentID, userID string, amount f
 // ListInstallments retrieves the full installment debt schedule for a user, ordered by due date ascending.
 func (s *Store) ListInstallments(userID string) ([]models.Installment, error) {
 	query := `
-	SELECT id, payment_id, user_id, amount, due_date, is_paid, created_at
+	SELECT id, payment_id, user_id, amount_cents, due_date, is_paid, created_at
 	FROM installments
 	WHERE user_id = ?
 	ORDER BY due_date ASC;`
@@ -379,7 +376,7 @@ func (s *Store) ListInstallments(userID string) ([]models.Installment, error) {
 			&installment.ID,
 			&installment.PaymentID,
 			&installment.UserWithDebt,
-			&installment.Amount,
+			&installment.AmountCents,
 			&installment.DueDate,
 			&isPaidInt,
 			&installment.CreatedAt,
@@ -404,7 +401,7 @@ func (s *Store) ListInstallments(userID string) ([]models.Installment, error) {
 // ordered by due date ascending.
 func (s *Store) ListOverdueInstallments(userID string) ([]models.Installment, error) {
 	query := `
-	SELECT id, payment_id, user_id, amount, due_date, is_paid, created_at
+	SELECT id, payment_id, user_id, amount_cents, due_date, is_paid, created_at
 	FROM installments
 	WHERE user_id = ? AND is_paid = 0 and due_date < ?
 	ORDER BY due_date ASC;`
@@ -427,7 +424,7 @@ func (s *Store) ListOverdueInstallments(userID string) ([]models.Installment, er
 			&installment.ID,
 			&installment.PaymentID,
 			&installment.UserWithDebt,
-			&installment.Amount,
+			&installment.AmountCents,
 			&installment.DueDate,
 			&isPaidInt,
 			&installment.CreatedAt,
@@ -452,7 +449,7 @@ func (s *Store) ListOverdueInstallments(userID string) ([]models.Installment, er
 // schedule in a single composite response.
 func (s *Store) GetPaymentWithInstallments(paymentID string) (*models.PaymentWithInstallments, error) {
 	query := `
-	SELECT id, sender_id, receiver_id, amount, total_amount, note, payment_type, total_installments, status, created_at
+	SELECT id, sender_id, receiver_id, amount_cents, total_amount_cents, note, payment_type, total_installments, status, created_at
     FROM payments
     WHERE id = ?;`
 
@@ -462,8 +459,8 @@ func (s *Store) GetPaymentWithInstallments(paymentID string) (*models.PaymentWit
 		&pwi.Payment.ID,
 		&pwi.Payment.SenderID,
 		&pwi.Payment.ReceiverID,
-		&pwi.Payment.Amount,
-		&pwi.Payment.TotalAmount,
+		&pwi.Payment.AmountCents,
+		&pwi.Payment.TotalAmountCents,
 		&pwi.Payment.Note,
 		&pwi.Payment.PaymentType,
 		&pwi.Payment.TotalInstallments,
@@ -478,7 +475,7 @@ func (s *Store) GetPaymentWithInstallments(paymentID string) (*models.PaymentWit
 	}
 
 	query = `
-    SELECT id, payment_id, user_id, amount, due_date, is_paid, created_at
+    SELECT id, payment_id, user_id, amount_cents, due_date, is_paid, created_at
     FROM installments
     WHERE payment_id = ?
     ORDER BY due_date ASC;`
@@ -499,7 +496,7 @@ func (s *Store) GetPaymentWithInstallments(paymentID string) (*models.PaymentWit
 			&i.ID,
 			&i.PaymentID,
 			&i.UserWithDebt,
-			&i.Amount,
+			&i.AmountCents,
 			&i.DueDate,
 			&isPaidInt,
 			&i.CreatedAt,
