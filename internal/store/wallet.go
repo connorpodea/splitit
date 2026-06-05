@@ -92,7 +92,47 @@ func (s *Store) ListPaymentsByUser(userID string) ([]models.Payment, error) {
 // ListPaymentsBetweenUsers retrieves the isolated transaction stream shared exclusively
 // between two specific user identities.
 func (s *Store) ListPaymentsBetweenUsers(userID, otherID string) ([]models.Payment, error) {
-	return nil, nil
+	query := `
+    SELECT id, sender_id, receiver_id, amount, total_amount, note, payment_type, total_installments, status, created_at
+    FROM payments
+    WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)
+    ORDER BY created_at DESC;` // Explicit grouping guarantees safety if filters are added later
+
+	rows, err := s.db.Query(query, userID, otherID, otherID, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract isolated transaction ledger between '%s' and '%s': %w", userID, otherID, err)
+	}
+	defer rows.Close()
+
+	payments := []models.Payment{}
+
+	for rows.Next() {
+		var p models.Payment
+
+		err = rows.Scan(
+			&p.ID,
+			&p.SenderID,
+			&p.ReceiverID,
+			&p.Amount,
+			&p.TotalAmount,
+			&p.Note,
+			&p.PaymentType,
+			&p.TotalInstallments,
+			&p.Status,
+			&p.CreatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan ledger row segment into payment struct: %w", err)
+		}
+
+		payments = append(payments, p)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("detected stream cursor failure during shared history compilation for context pair ('%s', '%s'): %w", userID, otherID, err)
+	}
+
+	return payments, nil
 }
 
 // ListWalletTransactions retrieves the absolute balance mutation history (deposits and withdrawals)
