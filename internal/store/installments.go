@@ -191,9 +191,16 @@ func (s *Store) PayInstallment(installmentID, paymentID, userID string, amount f
 	SET balance = balance - ?
 	WHERE id = ?;`
 
-	_, err = transaction.Exec(deductQuery, amount, userID)
+	deductResult, err := transaction.Exec(deductQuery, amount, userID)
 	if err != nil {
 		return fmt.Errorf("installment settlement failed: unable to deduct $%.2f from buyer ID '%s': %w", amount, userID, err)
+	}
+	deductRows, err := deductResult.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to read buyer deduction execution state metrics: %w", err)
+	}
+	if deductRows == 0 {
+		return fmt.Errorf("installment settlement rejected: buyer account ID '%s' not found in user registry", userID)
 	}
 
 	creditQuery := `
@@ -201,9 +208,16 @@ func (s *Store) PayInstallment(installmentID, paymentID, userID string, amount f
 	SET balance = balance + ?
 	WHERE id = ?;`
 
-	_, err = transaction.Exec(creditQuery, amount, "app_treasury")
+	creditResult, err := transaction.Exec(creditQuery, amount, "app_treasury")
 	if err != nil {
 		return fmt.Errorf("installment settlement failed: unable to credit $%.2f to treasury: %w", amount, err)
+	}
+	creditRows, err := creditResult.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to read treasury credit execution state metrics: %w", err)
+	}
+	if creditRows == 0 {
+		return fmt.Errorf("installment settlement rejected: treasury account not found in user registry")
 	}
 
 	// Mark the installment row as paid
@@ -212,9 +226,16 @@ func (s *Store) PayInstallment(installmentID, paymentID, userID string, amount f
 	SET is_paid = 1
 	WHERE id = ?;`
 
-	_, err = transaction.Exec(markPaidQuery, installmentID)
+	markResult, err := transaction.Exec(markPaidQuery, installmentID)
 	if err != nil {
 		return fmt.Errorf("installment settlement failed: unable to mark installment ID '%s' as paid: %w", installmentID, err)
+	}
+	markRows, err := markResult.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to read installment paid-state execution metrics: %w", err)
+	}
+	if markRows == 0 {
+		return fmt.Errorf("installment settlement rejected: installment ID '%s' not found in debt schedule registry", installmentID)
 	}
 
 	// Check if this installment was paid late and penalize the credit score accordingly
@@ -247,9 +268,16 @@ func (s *Store) PayInstallment(installmentID, paymentID, userID string, amount f
 	SET credit_score = MIN(100, MAX(0, credit_score + ?))
 	WHERE id = ?;`
 
-	_, err = transaction.Exec(scoreQuery, scoreDelta, userID)
+	scoreResult, err := transaction.Exec(scoreQuery, scoreDelta, userID)
 	if err != nil {
 		return fmt.Errorf("installment settlement failed: unable to apply credit score adjustment for user ID '%s': %w", userID, err)
+	}
+	scoreRows, err := scoreResult.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to read credit score adjustment execution state metrics: %w", err)
+	}
+	if scoreRows == 0 {
+		return fmt.Errorf("installment settlement rejected: credit score update target account ID '%s' not found in user registry", userID)
 	}
 
 	// Check if all installments for this loan are now paid
@@ -282,9 +310,16 @@ func (s *Store) PayInstallment(installmentID, paymentID, userID string, amount f
 		SET credit_limit = credit_limit + ?
 		WHERE id = ?;`
 
-		_, err = transaction.Exec(restoreQuery, loanAmount, userID)
+		restoreResult, err := transaction.Exec(restoreQuery, loanAmount, userID)
 		if err != nil {
 			return fmt.Errorf("installment settlement failed: unable to restore $%.2f to credit limit for user ID '%s': %w", loanAmount, userID, err)
+		}
+		restoreRows, err := restoreResult.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("failed to read credit limit restoration execution state metrics: %w", err)
+		}
+		if restoreRows == 0 {
+			return fmt.Errorf("installment settlement rejected: credit limit restoration target account ID '%s' not found in user registry", userID)
 		}
 
 		loanStatusQuery := `
@@ -292,9 +327,16 @@ func (s *Store) PayInstallment(installmentID, paymentID, userID string, amount f
 		SET status = 'completed'
 		WHERE id = ?;`
 
-		_, err = transaction.Exec(loanStatusQuery, paymentID)
+		loanStatusResult, err := transaction.Exec(loanStatusQuery, paymentID)
 		if err != nil {
 			return fmt.Errorf("installment settlement failed: unable to mark loan ID '%s' as completed: %w", paymentID, err)
+		}
+		loanStatusRows, err := loanStatusResult.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("failed to read loan completion status execution state metrics: %w", err)
+		}
+		if loanStatusRows == 0 {
+			return fmt.Errorf("installment settlement rejected: master loan record ID '%s' not found in payments ledger", paymentID)
 		}
 	}
 

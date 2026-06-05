@@ -38,24 +38,38 @@ func (s *Store) Pay(payment *models.Payment) error {
 
 	// Update the senders balance to deduct the upfront payment
 	query := `
-	UPDATE users 
-	SET balance = balance - ? 
+	UPDATE users
+	SET balance = balance - ?
 	WHERE id = ?;`
 
-	_, err = transaction.Exec(query, payment.Amount, payment.SenderID)
+	result, err := transaction.Exec(query, payment.Amount, payment.SenderID)
 	if err != nil {
 		return fmt.Errorf("ledger settlement failed: unable to clear balance deduction of $%.2f from sender ID '%s': %w", payment.Amount, payment.SenderID, err)
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to read sender deduction execution state metrics: %w", err)
+	}
+	if rowsAffected == 0 {
+		return fmt.Errorf("ledger settlement rejected: sender account ID '%s' not found in user registry", payment.SenderID)
 	}
 
 	// Update receivers balance to receive the total payment
 	query = `
-	UPDATE users 
-	SET balance = balance + ? 
+	UPDATE users
+	SET balance = balance + ?
 	WHERE id = ?;`
 
-	_, err = transaction.Exec(query, payment.TotalAmount, payment.ReceiverID)
+	result, err = transaction.Exec(query, payment.TotalAmount, payment.ReceiverID)
 	if err != nil {
 		return fmt.Errorf("ledger settlement failed: unable to credit balance allocation of $%.2f to receiver ID '%s': %w", payment.TotalAmount, payment.ReceiverID, err)
+	}
+	rowsAffected, err = result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to read receiver credit execution state metrics: %w", err)
+	}
+	if rowsAffected == 0 {
+		return fmt.Errorf("ledger settlement rejected: receiver account ID '%s' not found in user registry", payment.ReceiverID)
 	}
 
 	// Create a new row in the senders payment table
@@ -263,9 +277,18 @@ func (s *Store) UpdatePaymentRequestStatus(paymentID, newStatus string) error {
 	SET status = ?
 	WHERE id = ?;`
 
-	_, err := s.db.Exec(query, newStatus, paymentID)
+	result, err := s.db.Exec(query, newStatus, paymentID)
 	if err != nil {
 		return fmt.Errorf("state machine error: failed to transition payment invoice request ID '%s' to state token '%s': %w", paymentID, newStatus, err)
 	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to read payment request status transition execution metrics: %w", err)
+	}
+	if rowsAffected == 0 {
+		return fmt.Errorf("state machine rejected: payment invoice request ID '%s' not found in ledger registry", paymentID)
+	}
+
 	return nil
 }

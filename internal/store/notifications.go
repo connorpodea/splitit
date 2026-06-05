@@ -67,7 +67,7 @@ func (s *Store) CountUnseenNotifications(userID string) (int, error) {
 
 	var count int
 
-	err := s.db.QueryRow(query).Scan(&count)
+	err := s.db.QueryRow(query, userID).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("failed to aggregate unseen notification count metric for user ID '%s': %w", userID, err)
 	}
@@ -80,10 +80,19 @@ func (s *Store) MarkNotificationSeen(notifID, userID string) error {
 	SET is_seen = 1
 	WHERE id = ? AND user_id = ?;`
 
-	_, err := s.db.Exec(query, notifID, userID)
+	result, err := s.db.Exec(query, notifID, userID)
 	if err != nil {
 		return fmt.Errorf("failed to mark notification ID '%s' as seen for user ID '%s': %w", notifID, userID, err)
 	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to read notification seen-state execution metrics: %w", err)
+	}
+	if rowsAffected == 0 {
+		return fmt.Errorf("notification state transition rejected: notification ID '%s' not found or unauthorized for user '%s'", notifID, userID)
+	}
+
 	return nil
 }
 

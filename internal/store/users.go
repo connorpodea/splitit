@@ -187,9 +187,18 @@ func (s *Store) UpdateCreditScore(userID string, delta int) error {
 	SET credit_score = MIN(100, MAX(0, credit_score + ?))
 	WHERE id = ?`
 
-	_, err := s.db.Exec(query, delta, userID)
+	result, err := s.db.Exec(query, delta, userID)
 	if err != nil {
 		return fmt.Errorf("failed to apply credit score adjustment of %+d points to user ID '%s': %w", delta, userID, err)
 	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to read credit score adjustment execution state metrics: %w", err)
+	}
+	if rowsAffected == 0 {
+		return fmt.Errorf("credit score adjustment rejected: user account ID '%s' not found in user registry", userID)
+	}
+
 	return nil
 }

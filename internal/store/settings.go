@@ -1,6 +1,8 @@
 package store
 
 import (
+	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/connorpodea/splitit/internal/models"
@@ -17,12 +19,19 @@ func (s *Store) Deposit(userID string, amount float64) error {
 	if err != nil {
 		return fmt.Errorf("failed to open transaction session context for deposit: %w", err)
 	}
-	// This discards changes if an error happens midway through
 	defer transaction.Rollback()
 
-	_, err = transaction.Exec(query, amount, userID)
+	result, err := transaction.Exec(query, amount, userID)
 	if err != nil {
 		return fmt.Errorf("failed to clear balance deposit allocation of $%.2f for user ID '%s': %w", amount, userID, err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to read deposit execution state metrics: %w", err)
+	}
+	if rowsAffected == 0 {
+		return fmt.Errorf("deposit rejected: user account ID '%s' not found in user registry", userID)
 	}
 
 	if err = transaction.Commit(); err != nil {
@@ -41,13 +50,21 @@ func (s *Store) Withdraw(userID string, amount float64) error {
 
 	transaction, err := s.db.Begin()
 	if err != nil {
-		return fmt.Errorf("failed to open transaction session context for deposit: %w", err)
+		return fmt.Errorf("failed to open transaction session context for withdrawal: %w", err)
 	}
 	defer transaction.Rollback()
 
-	_, err = transaction.Exec(query, amount, userID)
+	result, err := transaction.Exec(query, amount, userID)
 	if err != nil {
 		return fmt.Errorf("failed to clear balance withdraw allocation of $%.2f for user ID '%s': %w", amount, userID, err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to read withdrawal execution state metrics: %w", err)
+	}
+	if rowsAffected == 0 {
+		return fmt.Errorf("withdrawal rejected: user account ID '%s' not found in user registry", userID)
 	}
 
 	if err = transaction.Commit(); err != nil {
@@ -77,8 +94,8 @@ func (s *Store) CreateLinkedCard(card *models.LinkedCard) error {
 // to the card owner via dual key constraint enforcement.
 func (s *Store) DeleteLinkedCard(cardID, userID string) error {
 	query := `
-    DELETE FROM linked_cards
-    WHERE id = ? AND user_id = ?;`
+	DELETE FROM linked_cards
+	WHERE id = ? AND user_id = ?;`
 
 	transaction, err := s.db.Begin()
 	if err != nil {
@@ -109,9 +126,9 @@ func (s *Store) DeleteLinkedCard(cardID, userID string) error {
 // ListLinkedCards retrieves all external funding instruments currently registered to a specific user.
 func (s *Store) ListLinkedCards(userID string) ([]models.LinkedCard, error) {
 	query := `
-    SELECT id, user_id, token_ref, last_4, brand, is_default, created_at
-    FROM linked_cards
-    WHERE user_id = ?;`
+	SELECT id, user_id, token_ref, last4, brand, is_default, created_at
+	FROM linked_cards
+	WHERE user_id = ?;`
 
 	rows, err := s.db.Query(query, userID)
 	if err != nil {
@@ -130,12 +147,10 @@ func (s *Store) ListLinkedCards(userID string) ([]models.LinkedCard, error) {
 			return nil, fmt.Errorf("failed to scan database asset row into card data struct: %w", err)
 		}
 
-		// Convert the SQLite integer flag back to a clean Go boolean
 		c.IsDefault = isDefaultInt == 1
 		cards = append(cards, c)
 	}
 
-	// Verify that the database stream cursor didn't fail mid-flight
 	if err = rows.Err(); err != nil {
 		return nil, fmt.Errorf("detected a mid-stream cursor failure during cards row iteration loop for user '%s': %w", userID, err)
 	}
@@ -145,12 +160,10 @@ func (s *Store) ListLinkedCards(userID string) ([]models.LinkedCard, error) {
 
 // GetLinkedCard fetches a single linked card record by composite card/user identity key pair.
 func (s *Store) GetLinkedCard(cardID, userID string) (*models.LinkedCard, error) {
-	// GetLinkedCard fetches a single linked card record by composite card/user identity key pair.
-func (s *Store) GetLinkedCard(cardID, userID string) (*models.LinkedCard, error) {
 	query := `
-    SELECT id, user_id, token_ref, last_4, brand, is_default, created_at
-    FROM linked_cards
-    WHERE id = ? AND user_id = ?;`
+	SELECT id, user_id, token_ref, last4, brand, is_default, created_at
+	FROM linked_cards
+	WHERE id = ? AND user_id = ?;`
 
 	var c models.LinkedCard
 	var isDefaultInt int
@@ -170,11 +183,10 @@ func (s *Store) GetLinkedCard(cardID, userID string) (*models.LinkedCard, error)
 // SetDefaultCard flags an individual card as the principal funding source for a user account,
 // clearing any previously active default flag in the same atomic operation.
 func (s *Store) SetDefaultCard(cardID, userID string) error {
-	// The CASE statement checks each row: if the ID matches cardID, give it a 1. Otherwise, give it a 0.
 	query := `
-    UPDATE linked_cards
-    SET is_default = CASE WHEN id = ? THEN 1 ELSE 0 END
-    WHERE user_id = ?;`
+	UPDATE linked_cards
+	SET is_default = CASE WHEN id = ? THEN 1 ELSE 0 END
+	WHERE user_id = ?;`
 
 	result, err := s.db.Exec(query, cardID, userID)
 	if err != nil {
@@ -205,15 +217,14 @@ func (s *Store) GetUserSettings(userID string) (*models.UserSettings, error) {
 
 func (s *Store) UpsertUserSettings(settings *models.UserSettings) error {
 	query := `
-    INSERT INTO user_settings (user_id, theme, email_notifications, is_discoverable, updated_at)
-    VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-    ON CONFLICT (user_id) DO UPDATE SET
-        theme = excluded.theme,
-        email_notifications = excluded.email_notifications,
-        is_discoverable = excluded.is_discoverable,
-        updated_at = CURRENT_TIMESTAMP;`
+	INSERT INTO user_settings (user_id, theme, email_notifications, is_discoverable, updated_at)
+	VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+	ON CONFLICT (user_id) DO UPDATE SET
+		theme = excluded.theme,
+		email_notifications = excluded.email_notifications,
+		is_discoverable = excluded.is_discoverable,
+		updated_at = CURRENT_TIMESTAMP;`
 
-	// Convert Go booleans to SQLite integers (0 or 1) to match your table schemas
 	emailNotifsInt := 0
 	if settings.EmailNotifications {
 		emailNotifsInt = 1
