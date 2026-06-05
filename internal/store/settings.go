@@ -145,7 +145,26 @@ func (s *Store) ListLinkedCards(userID string) ([]models.LinkedCard, error) {
 
 // GetLinkedCard fetches a single linked card record by composite card/user identity key pair.
 func (s *Store) GetLinkedCard(cardID, userID string) (*models.LinkedCard, error) {
-	return nil, nil
+	// GetLinkedCard fetches a single linked card record by composite card/user identity key pair.
+func (s *Store) GetLinkedCard(cardID, userID string) (*models.LinkedCard, error) {
+	query := `
+    SELECT id, user_id, token_ref, last_4, brand, is_default, created_at
+    FROM linked_cards
+    WHERE id = ? AND user_id = ?;`
+
+	var c models.LinkedCard
+	var isDefaultInt int
+
+	err := s.db.QueryRow(query, cardID, userID).Scan(&c.ID, &c.UserID, &c.TokenRef, &c.Last4, &c.Brand, &isDefaultInt, &c.CreatedAt)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("linked card asset not found for card ID '%s' under user '%s': %w", cardID, userID, err)
+		}
+		return nil, fmt.Errorf("failed to execute single card extraction protocol: %w", err)
+	}
+
+	c.IsDefault = isDefaultInt == 1
+	return &c, nil
 }
 
 // SetDefaultCard flags an individual card as the principal funding source for a user account,
