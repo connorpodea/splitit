@@ -8,6 +8,9 @@ import (
 	"github.com/connorpodea/splitit/internal/models"
 )
 
+// Pay executes a direct peer-to-peer payment: verifies the sender has sufficient funds,
+// deducts the sender's balance, credits the receiver, records the transaction, and
+// dispatches a payment notification — all within a single atomic database transaction.
 func (s *Store) Pay(payment *models.Payment) error {
 	// Generate a unique transaction identifier inside the store so the client never controls primary keys
 	if payment.ID == "" {
@@ -98,6 +101,7 @@ func (s *Store) Pay(payment *models.Payment) error {
 	return nil
 }
 
+// GetPayment retrieves a single payment record by its transaction ID.
 func (s *Store) GetPayment(paymentID string) (*models.Payment, error) {
 	query := `
 	SELECT id, sender_id, receiver_id, amount, total_amount, note, payment_type, total_installments, status, created_at
@@ -127,6 +131,7 @@ func (s *Store) GetPayment(paymentID string) (*models.Payment, error) {
 	return &payment, nil
 }
 
+// ListPaymentsReceived returns all inbound payment records for a user, ordered newest first.
 func (s *Store) ListPaymentsReceived(userID string) ([]models.Payment, error) {
 	query := `
     SELECT id, sender_id, receiver_id, amount, total_amount, note, payment_type, total_installments, status, created_at
@@ -170,6 +175,7 @@ func (s *Store) ListPaymentsReceived(userID string) ([]models.Payment, error) {
 	return payments, nil
 }
 
+// ListPaymentsSent returns all outbound payment records for a user, ordered newest first.
 func (s *Store) ListPaymentsSent(userID string) ([]models.Payment, error) {
 	query := `
     SELECT id, sender_id, receiver_id, amount, total_amount, note, payment_type, total_installments, status, created_at
@@ -213,6 +219,7 @@ func (s *Store) ListPaymentsSent(userID string) ([]models.Payment, error) {
 	return payments, nil
 }
 
+// CreatePaymentRequest inserts a pending payment request record and notifies the payer.
 func (s *Store) CreatePaymentRequest(request *models.PaymentRequest) error {
 	// Generate a unique request identifier inside the store so the client never controls primary keys
 	if request.ID == "" {
@@ -239,6 +246,7 @@ func (s *Store) CreatePaymentRequest(request *models.PaymentRequest) error {
 	return nil
 }
 
+// ListIncomingPaymentRequests returns all pending payment requests where the user is the payer.
 func (s *Store) ListIncomingPaymentRequests(userID string) ([]models.PaymentRequest, error) {
 	query := `
 	SELECT id, requester_id, payer_id, amount, note, status, created_at
@@ -279,6 +287,7 @@ func (s *Store) ListIncomingPaymentRequests(userID string) ([]models.PaymentRequ
 	return requests, nil
 }
 
+// ListOutgoingPaymentRequests returns all pending payment requests that the user has sent out.
 func (s *Store) ListOutgoingPaymentRequests(userID string) ([]models.PaymentRequest, error) {
 	query := `
 	SELECT id, requester_id, payer_id, amount, note, status, created_at
@@ -320,6 +329,7 @@ func (s *Store) ListOutgoingPaymentRequests(userID string) ([]models.PaymentRequ
 	return requests, nil
 }
 
+// UpdatePaymentRequestStatus transitions a payment request to a new status string (e.g. "accepted", "declined").
 func (s *Store) UpdatePaymentRequestStatus(paymentID, newStatus string) error {
 	query := `
 	UPDATE payment_requests

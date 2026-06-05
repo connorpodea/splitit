@@ -9,6 +9,8 @@ import (
 	"github.com/connorpodea/splitit/internal/models"
 )
 
+// SendFriendRequest handles a request to send a friend invitation, binding the sender
+// identity from the session cookie before delegating to the store.
 func (h *Handler) SendFriendRequest(w http.ResponseWriter, r *http.Request) {
 	// Ensure this endpoint only accepts POST requests
 	if r.Method != http.MethodPost {
@@ -46,6 +48,7 @@ func (h *Handler) SendFriendRequest(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusCreated, input)
 }
 
+// ListIncomingFriendRequests returns all pending friend requests received by the authenticated user.
 func (h *Handler) ListIncomingFriendRequests(w http.ResponseWriter, r *http.Request) {
 	// Ensure that this endpoint only accepts GET requests
 	if r.Method != http.MethodGet {
@@ -70,6 +73,7 @@ func (h *Handler) ListIncomingFriendRequests(w http.ResponseWriter, r *http.Requ
 	WriteJSON(w, http.StatusOK, requests)
 }
 
+// ListOutgoingFriendRequests returns all pending friend requests sent by the authenticated user.
 func (h *Handler) ListOutgoingFriendRequests(w http.ResponseWriter, r *http.Request) {
 	// Ensure that this endpoint only accepts GET requests
 	if r.Method != http.MethodGet {
@@ -94,6 +98,8 @@ func (h *Handler) ListOutgoingFriendRequests(w http.ResponseWriter, r *http.Requ
 	WriteJSON(w, http.StatusOK, requests)
 }
 
+// AcceptFriendRequest accepts a pending friend request by ID, using the session cookie
+// to confirm the caller is the intended receiver.
 func (h *Handler) AcceptFriendRequest(w http.ResponseWriter, r *http.Request) {
 	// Ensure this endpoint only accepts POST requests
 	if r.Method != http.MethodPost {
@@ -129,6 +135,7 @@ func (h *Handler) AcceptFriendRequest(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, input)
 }
 
+// DeclineFriendRequest deletes a pending friend request by ID for the authenticated user.
 func (h *Handler) DeclineFriendRequest(w http.ResponseWriter, r *http.Request) {
 	// Ensure this endpoint on accepts POST requests
 	if r.Method != http.MethodPost {
@@ -166,6 +173,8 @@ func (h *Handler) DeclineFriendRequest(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, input)
 }
 
+// RemoveFriendMutual severs a bidirectional friendship, binding the caller's identity
+// from the session cookie so users can only remove their own friendships.
 func (h *Handler) RemoveFriendMutual(w http.ResponseWriter, r *http.Request) {
 	// Ensure this endpoint on accepts POST requests
 	if r.Method != http.MethodPost {
@@ -203,6 +212,7 @@ func (h *Handler) RemoveFriendMutual(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, input)
 }
 
+// ListFriends returns the public profiles of all active friends for the authenticated user.
 func (h *Handler) ListFriends(w http.ResponseWriter, r *http.Request) {
 	// Ensure this endpoint only accepts GET requests
 	if r.Method != http.MethodGet {
@@ -227,6 +237,8 @@ func (h *Handler) ListFriends(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, friends)
 }
 
+// viewFriends renders the social section HTML, including pending incoming friend request cards
+// and the searchable friends list.
 func viewFriends(friends []models.Profile, friendRequests []models.FriendRequest) string {
 	friendCount := len(friends)
 
@@ -311,6 +323,7 @@ func viewFriends(friends []models.Profile, friendRequests []models.FriendRequest
 `
 }
 
+// friendsRows renders the list of individual friend row HTML elements for the social view.
 func friendsRows(friends []models.Profile) string {
 	out := ""
 	for i, f := range friends {
@@ -346,6 +359,8 @@ func friendsRows(friends []models.Profile) string {
 	return out
 }
 
+// addFriendSheetHTML renders the bottom-sheet HTML for the add-friend search flow,
+// with a live-search input that queries the profiles list endpoint.
 func addFriendSheetHTML() string {
 	return `
 <div class="sheet-backdrop" id="addfriend-sheet" onclick="if(event.target===this) closeSheet('addfriend')">

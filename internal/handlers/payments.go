@@ -8,6 +8,8 @@ import (
 	"github.com/connorpodea/splitit/internal/models"
 )
 
+// Pay handles a direct peer-to-peer payment request, binding the sender identity
+// from the session cookie before passing the payload to the store.
 func (h *Handler) Pay(w http.ResponseWriter, r *http.Request) {
 	// Ensure that this endpoint only accepts POST requests
 	if r.Method != http.MethodPost {
@@ -45,6 +47,7 @@ func (h *Handler) Pay(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, input)
 }
 
+// GetPayment returns a single payment record by the payment_id URL query parameter.
 func (h *Handler) GetPayment(w http.ResponseWriter, r *http.Request) {
 	// Ensure that this endpoint only accepts GET requests
 	if r.Method != http.MethodGet {
@@ -76,6 +79,8 @@ func (h *Handler) GetPayment(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, payment)
 }
 
+// CreatePaymentRequest creates a new pending payment request, binding the requester identity
+// from the session cookie to prevent spoofing.
 func (h *Handler) CreatePaymentRequest(w http.ResponseWriter, r *http.Request) {
 	// Ensure this endpoint only accepts POST requests
 	if r.Method != http.MethodPost {
@@ -113,6 +118,7 @@ func (h *Handler) CreatePaymentRequest(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusCreated, input)
 }
 
+// ListIncomingPaymentRequests returns all pending payment requests where the authenticated user is the payer.
 func (h *Handler) ListIncomingPaymentRequests(w http.ResponseWriter, r *http.Request) {
 	// Ensure this endpoint only accepts GET requests
 	if r.Method != http.MethodGet {
@@ -137,6 +143,7 @@ func (h *Handler) ListIncomingPaymentRequests(w http.ResponseWriter, r *http.Req
 	WriteJSON(w, http.StatusOK, requests)
 }
 
+// ListOutgoingPaymentRequests returns all pending payment requests that the authenticated user has sent.
 func (h *Handler) ListOutgoingPaymentRequests(w http.ResponseWriter, r *http.Request) {
 	// Ensure this endpoint only accepts GET requests
 	if r.Method != http.MethodGet {
@@ -161,6 +168,7 @@ func (h *Handler) ListOutgoingPaymentRequests(w http.ResponseWriter, r *http.Req
 	WriteJSON(w, http.StatusOK, requests)
 }
 
+// UpdatePaymentRequestStatus transitions a payment request to a new status (e.g. accepted, declined).
 func (h *Handler) UpdatePaymentRequestStatus(w http.ResponseWriter, r *http.Request) {
 	// Ensure this endpoint only accepts POST requests
 	if r.Method != http.MethodPost {
@@ -199,6 +207,8 @@ func (h *Handler) UpdatePaymentRequestStatus(w http.ResponseWriter, r *http.Requ
 	WriteJSON(w, http.StatusOK, input)
 }
 
+// paySheetHTML renders the bottom-sheet HTML for the payment action, containing both the
+// direct send tab and the BNPL loan tab with friend selector and amount inputs.
 func paySheetHTML(friends []models.Profile, availableCredit float64) string {
 	friendOpts := `<option value="">Select a friend…</option>`
 	for _, f := range friends {
@@ -271,6 +281,8 @@ func paySheetHTML(friends []models.Profile, availableCredit float64) string {
 </div>`
 }
 
+// requestSheetHTML renders the bottom-sheet HTML for creating a money request,
+// with a friend selector, amount input, and note field.
 func requestSheetHTML(friends []models.Profile) string {
 	friendOpts := `<option value="">Select a friend…</option>`
 	for _, f := range friends {

@@ -32,6 +32,7 @@ func WriteJSON(w http.ResponseWriter, status int, data any) {
 	json.NewEncoder(w).Encode(data)
 }
 
+// writeHTML writes a complete HTML string to the response with a 200 status and text/html content type.
 func writeHTML(w http.ResponseWriter, body string) {
 	w.Header().Set("Content-Type", "text/html")
 	w.WriteHeader(http.StatusOK)

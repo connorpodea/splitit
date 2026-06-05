@@ -6,6 +6,8 @@ import (
 	"github.com/connorpodea/splitit/internal/models"
 )
 
+// CreateGroup inserts a new group record and immediately registers the creator as its first member
+// in a single atomic transaction.
 func (s *Store) CreateGroup(group *models.Group) error {
 	// Generate a unique group identifier inside the store so the client never controls primary keys
 	if group.ID == "" {
@@ -42,6 +44,7 @@ func (s *Store) CreateGroup(group *models.Group) error {
 	return nil
 }
 
+// ListGroups retrieves all groups that a user is a member of, ordered by name.
 func (s *Store) ListGroups(userID string) ([]models.Group, error) {
 	query := `
 	SELECT groups.id, groups.name, groups.creator_id, groups.created_at
@@ -80,6 +83,7 @@ func (s *Store) ListGroups(userID string) ([]models.Group, error) {
 	return list, nil
 }
 
+// ListGroupMembers returns the public profile of every active member in a group, ordered by name.
 func (s *Store) ListGroupMembers(groupID string) ([]models.Profile, error) {
 	query := `
 	SELECT users.id, users.name, users.email, users.phone_number, users.created_at
@@ -119,6 +123,7 @@ func (s *Store) ListGroupMembers(groupID string) ([]models.Profile, error) {
 	return members, nil
 }
 
+// SendGroupInvitation creates a pending invitation record from a sender to a receiver for a specific group.
 func (s *Store) SendGroupInvitation(groupID, senderID, receiverID string) error {
 	query := `
 	INSERT INTO group_invitations 
@@ -132,6 +137,8 @@ func (s *Store) SendGroupInvitation(groupID, senderID, receiverID string) error 
 	return nil
 }
 
+// AcceptGroupInvitation removes the invitation row and registers the caller as a group member
+// in a single atomic transaction. The groupID is derived from the database to prevent client spoofing.
 func (s *Store) AcceptGroupInvitation(invitationID, callerID string) error {
 	transaction, err := s.db.Begin()
 	if err != nil {
@@ -178,6 +185,8 @@ func (s *Store) AcceptGroupInvitation(invitationID, callerID string) error {
 	return nil
 }
 
+// DeclineGroupInvitation deletes a pending group invitation, restricted to the intended receiver
+// via a dual-key WHERE constraint.
 func (s *Store) DeclineGroupInvitation(invitationID, callerID string) error {
 	// The WHERE clause on receiver_id ensures a user can only decline invitations sent to them
 	query := `
@@ -209,6 +218,7 @@ func (s *Store) DeclineGroupInvitation(invitationID, callerID string) error {
 	return nil
 }
 
+// ListIncomingGroupInvitations returns all pending group invitations sent to a specific receiver.
 func (s *Store) ListIncomingGroupInvitations(receiverID string) ([]models.GroupInvitation, error) {
 	query := `
 	SELECT id, group_id, sender_id, receiver_id, created_at
@@ -247,6 +257,7 @@ func (s *Store) ListIncomingGroupInvitations(receiverID string) ([]models.GroupI
 	return invitations, nil
 }
 
+// ListOutgoingGroupInvitations returns all pending group invitations that a sender has dispatched.
 func (s *Store) ListOutgoingGroupInvitations(senderID string) ([]models.GroupInvitation, error) {
 	query := `
 	SELECT id, group_id, sender_id, receiver_id, created_at
@@ -285,6 +296,8 @@ func (s *Store) ListOutgoingGroupInvitations(senderID string) ([]models.GroupInv
 	return invitations, nil
 }
 
+// RemoveGroupMember forcibly removes a target user from a group's membership roster.
+// Intended for group admin or moderation actions.
 func (s *Store) RemoveGroupMember(groupID, targetUserID string) error {
 	query := `
 	DELETE FROM group_members
@@ -315,6 +328,7 @@ func (s *Store) RemoveGroupMember(groupID, targetUserID string) error {
 	return nil
 }
 
+// LeaveGroup removes the calling user from a group's membership roster voluntarily.
 func (s *Store) LeaveGroup(groupID, userID string) error {
 	query := `
 	DELETE FROM group_members

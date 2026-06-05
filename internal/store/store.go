@@ -11,6 +11,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+// create_new_ID generates a cryptographically random 24-character hex string for use as a primary key.
 func create_new_ID() string {
 	b := make([]byte, 12)
 	rand.Read(b)
@@ -47,6 +48,8 @@ func NewFromPath(path string) (*Store, error) {
 	return s, nil
 }
 
+// createTables runs all CREATE TABLE IF NOT EXISTS statements on startup,
+// ensuring the full database schema exists before any queries are executed.
 func (s *Store) createTables() error {
 	query := `
 	CREATE TABLE IF NOT EXISTS users (

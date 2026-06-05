@@ -9,6 +9,8 @@ import (
 	"github.com/connorpodea/splitit/internal/models"
 )
 
+// CreateBNPLLoan handles a request to open a new buy-now-pay-later loan, binding the
+// borrower identity from the session cookie before delegating to the store layer.
 func (h *Handler) CreateBNPLLoan(w http.ResponseWriter, r *http.Request) {
 	// Ensure this endpoint only accepts POST requests
 	if r.Method != http.MethodPost {
@@ -46,6 +48,8 @@ func (h *Handler) CreateBNPLLoan(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusCreated, input)
 }
 
+// PayInstallment handles a request to settle a single BNPL installment, overriding the
+// userID from the session cookie to prevent users from paying other accounts' debts.
 func (h *Handler) PayInstallment(w http.ResponseWriter, r *http.Request) {
 	// Ensure that this endpoint only accepts POST requests
 	if r.Method != http.MethodPost {
@@ -89,6 +93,7 @@ func (h *Handler) PayInstallment(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, input)
 }
 
+// ListInstallments returns the full installment debt schedule for the authenticated user.
 func (h *Handler) ListInstallments(w http.ResponseWriter, r *http.Request) {
 	// Ensure that this endpoint only accepts GET requests
 	if r.Method != http.MethodGet {
@@ -113,6 +118,7 @@ func (h *Handler) ListInstallments(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, installments)
 }
 
+// ListOverdueInstallments returns all unpaid installments past their due date for the authenticated user.
 func (h *Handler) ListOverdueInstallments(w http.ResponseWriter, r *http.Request) {
 	// Ensure that this endpoint only accepts GET requests
 	if r.Method != http.MethodGet {
@@ -137,6 +143,8 @@ func (h *Handler) ListOverdueInstallments(w http.ResponseWriter, r *http.Request
 	WriteJSON(w, http.StatusOK, installments)
 }
 
+// viewHome renders the home dashboard section HTML, including the balance hero card,
+// quick-action buttons, overdue summary strip, and recent activity feed.
 func viewHome(name string, user *models.User, overdueInstallments []models.Installment, installments []models.Installment, incomingRequests []models.PaymentRequest) string {
 	firstName := strings.Fields(name)
 	greet := "there"
@@ -286,6 +294,8 @@ func viewHome(name string, user *models.User, overdueInstallments []models.Insta
 `
 }
 
+// viewActivity renders the activity section HTML with three sub-panes: incoming payment
+// requests, active BNPL plans, and overdue installments with pay-now actions.
 func viewActivity(installments []models.Installment, overdueInstallments []models.Installment, incomingRequests []models.PaymentRequest) string {
 	// Build overdue ID set for fast lookup.
 	overdueIDs := make(map[string]bool)

@@ -6,6 +6,8 @@ import (
 	"github.com/connorpodea/splitit/internal/models"
 )
 
+// SendFriendRequest inserts a pending friend request record and dispatches a notification
+// to the receiver in a non-blocking goroutine.
 func (s *Store) SendFriendRequest(request *models.FriendRequest) error {
 	query := `
 	INSERT INTO friend_requests
@@ -30,6 +32,7 @@ func (s *Store) SendFriendRequest(request *models.FriendRequest) error {
 	return nil
 }
 
+// ListIncomingFriendRequests returns all pending friend requests where the given user is the receiver.
 func (s *Store) ListIncomingFriendRequests(userID string) ([]models.FriendRequest, error) {
 	query := `
 	SELECT id, sender_id, receiver_id, created_at
@@ -67,6 +70,7 @@ func (s *Store) ListIncomingFriendRequests(userID string) ([]models.FriendReques
 	return requests, nil
 }
 
+// ListOutgoingFriendRequests returns all pending friend requests that a user has sent.
 func (s *Store) ListOutgoingFriendRequests(userID string) ([]models.FriendRequest, error) {
 	query := `
 	SELECT id, sender_id, receiver_id, created_at
@@ -104,6 +108,8 @@ func (s *Store) ListOutgoingFriendRequests(userID string) ([]models.FriendReques
 	return requests, nil
 }
 
+// AcceptFriendRequest removes the pending invitation and creates a bidirectional friendship row
+// in a single atomic transaction. The senderID is derived from the database to prevent spoofing.
 func (s *Store) AcceptFriendRequest(requestID, receiverID string) error {
 	transaction, err := s.db.Begin()
 	if err != nil {
@@ -151,6 +157,7 @@ func (s *Store) AcceptFriendRequest(requestID, receiverID string) error {
 	return nil
 }
 
+// DeclineFriendRequest deletes a pending friend request by ID.
 func (s *Store) DeclineFriendRequest(requestID string) error {
 	query := `
 	DELETE FROM friend_requests
@@ -181,6 +188,8 @@ func (s *Store) DeclineFriendRequest(requestID string) error {
 	return nil
 }
 
+// RemoveFriendMutual deletes both directional rows of a friendship in a single query,
+// severing the relationship for both parties simultaneously.
 func (s *Store) RemoveFriendMutual(userID, friendID string) error {
 	query := `
 	DELETE FROM friends
@@ -211,6 +220,7 @@ func (s *Store) RemoveFriendMutual(userID, friendID string) error {
 	return nil
 }
 
+// ListFriends returns the public profiles of all active friends for a user, ordered alphabetically.
 func (s *Store) ListFriends(userID string) ([]models.Profile, error) {
 	// Look up all friends of the current user and use the friends' IDs to return their profile
 	query := `

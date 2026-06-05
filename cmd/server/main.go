@@ -8,6 +8,7 @@ import (
 	"github.com/connorpodea/splitit/internal/store"
 )
 
+// main initializes the database, registers all HTTP routes, and starts the HTTP server.
 func main() {
 	// 1. DATABASE SETUP
 	s, err := store.New()

@@ -7,6 +7,7 @@ import (
 	"github.com/connorpodea/splitit/internal/models"
 )
 
+// ListNotifications returns all unseen notifications for the authenticated user.
 func (h *Handler) ListNotifications(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only GET requests are permitted on this route"})
@@ -24,6 +25,7 @@ func (h *Handler) ListNotifications(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, notifs)
 }
 
+// MarkNotificationSeen marks a single notification as seen for the authenticated user.
 func (h *Handler) MarkNotificationSeen(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only POST requests are permitted on this route"})
@@ -48,6 +50,7 @@ func (h *Handler) MarkNotificationSeen(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, map[string]bool{"success": true})
 }
 
+// ClearAllNotifications marks every notification for the authenticated user as seen in one batch.
 func (h *Handler) ClearAllNotifications(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only POST requests are permitted on this route"})
@@ -64,6 +67,8 @@ func (h *Handler) ClearAllNotifications(w http.ResponseWriter, r *http.Request) 
 	WriteJSON(w, http.StatusOK, map[string]bool{"success": true})
 }
 
+// viewNotifications renders the notifications section HTML, including per-type icons,
+// dismiss-on-click rows, and an empty state if there are no unseen notifications.
 func viewNotifications(notifications []models.Notification) string {
 	typeIcon := map[string]string{
 		"friend_request":   `<svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>`,

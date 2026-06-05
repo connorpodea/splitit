@@ -251,6 +251,8 @@ func (s *Store) GetUserSettings(userID string) (*models.UserSettings, error) {
 	return &settings, nil
 }
 
+// UpsertUserSettings inserts or updates the preference and privacy configuration for a user
+// in a single conflict-safe operation.
 func (s *Store) UpsertUserSettings(settings *models.UserSettings) error {
 	query := `
 	INSERT INTO user_settings (user_id, theme, email_notifications, is_discoverable, updated_at)

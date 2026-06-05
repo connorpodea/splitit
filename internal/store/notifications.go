@@ -6,6 +6,8 @@ import (
 	"github.com/connorpodea/splitit/internal/models"
 )
 
+// CreateNotification inserts a new notification record for a target user.
+// Called in goroutines after payments, friend requests, and other user-facing events.
 func (s *Store) CreateNotification(n *models.Notification) error {
 	// Generate a unique notification identifier inside the store so the client never controls primary keys
 	if n.ID == "" {
@@ -24,6 +26,7 @@ func (s *Store) CreateNotification(n *models.Notification) error {
 	return nil
 }
 
+// ListNotifications retrieves all unseen notification records for a user, ordered newest first.
 func (s *Store) ListNotifications(userID string) ([]models.Notification, error) {
 	query := `
 	SELECT id, user_id, type, title, body, link_view, is_seen, created_at
@@ -68,6 +71,7 @@ func (s *Store) ListNotifications(userID string) ([]models.Notification, error) 
 	return notifs, nil
 }
 
+// CountUnseenNotifications returns the total number of unseen notifications for a user.
 func (s *Store) CountUnseenNotifications(userID string) (int, error) {
 	query := `
 	SELECT COUNT(*)
@@ -83,6 +87,8 @@ func (s *Store) CountUnseenNotifications(userID string) (int, error) {
 	return count, nil
 }
 
+// MarkNotificationSeen sets a single notification's is_seen flag to true.
+// The userID constraint ensures a user can only mark their own notifications.
 func (s *Store) MarkNotificationSeen(notifID, userID string) error {
 	query := `
 	UPDATE notifications
@@ -105,6 +111,7 @@ func (s *Store) MarkNotificationSeen(notifID, userID string) error {
 	return nil
 }
 
+// ClearAllNotifications marks every notification for a user as seen in a single batch update.
 func (s *Store) ClearAllNotifications(userID string) error {
 	query := `
 	UPDATE notifications

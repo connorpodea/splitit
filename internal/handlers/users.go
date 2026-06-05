@@ -11,6 +11,8 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+// CreateUser handles new account registration, validating the username format, hashing the
+// password via bcrypt, and writing the new user record to the database.
 func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	// Ensure that this endpoint only accepts POST requests
 	if r.Method != http.MethodPost {
@@ -71,6 +73,8 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusCreated, map[string]string{"status": "ledger user allocation committed successfully", "id": new_user.ID})
 }
 
+// LoginUser authenticates a user by verifying their password hash, checking the account
+// is active, and issuing a session cookie on success.
 func (h *Handler) LoginUser(w http.ResponseWriter, r *http.Request) {
 	// Ensure that this endpoint only accepts POST requests
 	if r.Method != http.MethodPost {
@@ -148,6 +152,7 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, map[string]bool{"success": true})
 }
 
+// GetUser returns the full user record for the authenticated session, blocking deactivated accounts.
 func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
 	// Ensure that this endpoint only accepts GET requests
 	if r.Method != http.MethodGet {
@@ -176,6 +181,7 @@ func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, user)
 }
 
+// ListUsers returns all active user accounts for authenticated callers.
 func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
 	// Ensure that this endpoint only accepts GET requests
 	if r.Method != http.MethodGet {
@@ -200,6 +206,7 @@ func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, users)
 }
 
+// ListProfiles returns the public profiles of all active users for authenticated callers.
 func (h *Handler) ListProfiles(w http.ResponseWriter, r *http.Request) {
 	// Ensure that this endpoint only accepts GET requests
 	if r.Method != http.MethodGet {
@@ -224,6 +231,7 @@ func (h *Handler) ListProfiles(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, profiles)
 }
 
+// GetProfile returns the public profile for a specific active user, identified by the user_id query parameter.
 func (h *Handler) GetProfile(w http.ResponseWriter, r *http.Request) {
 	// Ensure that this endpoint only accepts GET requests
 	if r.Method != http.MethodGet {
@@ -255,10 +263,12 @@ func (h *Handler) GetProfile(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, profile)
 }
 
+// GetRegistrationView serves the registration screen HTML.
 func (h *Handler) GetRegistrationView(w http.ResponseWriter, r *http.Request) {
 	writeHTML(w, registerHTML())
 }
 
+// loginHTML returns the login form HTML with HTMX-powered submission and inline error display.
 func loginHTML() string {
 	return `
 <div class="w-full max-w-sm mx-auto px-4 py-8 auth-anim">
@@ -327,6 +337,8 @@ func loginHTML() string {
 </div>`
 }
 
+// registerHTML returns the registration form HTML with client-side validation, HTMX submission,
+// and a success toast on account creation.
 func registerHTML() string {
 	return `
 <div class="w-full max-w-sm mx-auto px-4 py-8 auth-anim">
@@ -428,6 +440,8 @@ func registerHTML() string {
 </div>`
 }
 
+// viewProfile renders the profile section HTML, displaying the user's Splitit Score, credit limit,
+// balance stats, and navigation menu.
 func viewProfile(user *models.User, avatar, name, handle, email, phone string, friends []models.Profile, installments []models.Installment) string {
 	score := user.CreditScore
 	scoreLabel := creditScoreLabel(score)
@@ -509,6 +523,7 @@ func viewProfile(user *models.User, avatar, name, handle, email, phone string, f
 `
 }
 
+// initials extracts a 1-2 character uppercase abbreviation from a full name for use in avatar elements.
 func initials(fullName string) string {
 	clean := strings.TrimSpace(fullName)
 	if clean == "" {
@@ -527,6 +542,7 @@ func initials(fullName string) string {
 	return strings.ToUpper(string(first[0])) + strings.ToUpper(string(last[0]))
 }
 
+// displayName returns the user's name if set, falling back to their user ID.
 func displayName(u *models.User) string {
 	if strings.TrimSpace(u.Name) != "" {
 		return u.Name
@@ -534,6 +550,7 @@ func displayName(u *models.User) string {
 	return u.ID
 }
 
+// profileDisplayName returns a profile's name if set, falling back to the profile ID.
 func profileDisplayName(p *models.Profile) string {
 	if strings.TrimSpace(p.Name) != "" {
 		return p.Name
@@ -541,6 +558,7 @@ func profileDisplayName(p *models.Profile) string {
 	return p.ID
 }
 
+// creditScoreLabel maps a numeric credit score to its corresponding tier label string.
 func creditScoreLabel(score uint8) string {
 	switch {
 	case score >= 76:
@@ -571,6 +589,7 @@ func (h *Handler) UpdateDisplayName(w http.ResponseWriter, r *http.Request) {}
 // account to an inactive state without purging underlying ledger records.
 func (h *Handler) DeactivateAccount(w http.ResponseWriter, r *http.Request) {}
 
+// avatarClass returns a CSS colour class for an avatar element by cycling through a fixed palette.
 func avatarClass(i int) string {
 	classes := []string{"av-indigo", "av-amber", "av-emerald", "av-violet", "av-cyan", "av-pink"}
 	return classes[i%len(classes)]

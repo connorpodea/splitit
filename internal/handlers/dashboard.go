@@ -7,6 +7,8 @@ import (
 	"github.com/connorpodea/splitit/internal/models"
 )
 
+// GetInitialView serves the root page: renders the login screen for unauthenticated or
+// deactivated users, and the full dashboard for valid active sessions.
 func (h *Handler) GetInitialView(w http.ResponseWriter, r *http.Request) {
 	cookie, err := r.Cookie("session_user_id")
 	if err != nil || cookie.Value == "" {
@@ -48,6 +50,8 @@ func (h *Handler) GetInitialView(w http.ResponseWriter, r *http.Request) {
 	writeHTML(w, dashboardHTML(user, friends, installments, overdueInstallments, incomingRequests, friendRequests, notifications))
 }
 
+// GetDashboardView re-renders the full dashboard HTML for an authenticated active user,
+// used by HTMX partial swaps after state-changing actions.
 func (h *Handler) GetDashboardView(w http.ResponseWriter, r *http.Request) {
 	cookie, err := r.Cookie("session_user_id")
 	if err != nil || cookie.Value == "" {
@@ -88,6 +92,8 @@ func (h *Handler) GetDashboardView(w http.ResponseWriter, r *http.Request) {
 	writeHTML(w, dashboardHTML(user, friends, installments, overdueInstallments, incomingRequests, friendRequests, notifications))
 }
 
+// dashboardHTML assembles the complete dashboard shell HTML including the topbar, sidebar,
+// all view sections, the bottom tab bar, action sheets, and the embedded client script.
 func dashboardHTML(user *models.User, friends []models.Profile, installments []models.Installment, overdueInstallments []models.Installment, incomingRequests []models.PaymentRequest, friendRequests []models.FriendRequest, notifications []models.Notification) string {
 	name := displayName(user)
 	avatar := initials(name)
@@ -216,6 +222,7 @@ func dashboardHTML(user *models.User, friends []models.Profile, installments []m
 </div>`
 }
 
+// dashboardStyles returns the full embedded CSS stylesheet for the dashboard shell as a style tag string.
 func dashboardStyles() string {
 	return `
 <style>
@@ -807,6 +814,8 @@ func dashboardStyles() string {
 // ---------------------------------------------------------------------------
 // CLIENT SCRIPT  (all actions are real API calls)
 // ---------------------------------------------------------------------------
+// dashboardScript returns the embedded JavaScript for all client-side dashboard interactions
+// including view routing, API calls, sheet management, and real-time UI updates.
 func dashboardScript() string {
 	return `
 <script>

@@ -2,6 +2,7 @@ package models
 
 import "time"
 
+// User represents a registered account holder with financial and identity attributes.
 type User struct {
 	ID           string  `json:"id"`
 	PasswordHash string  `json:"-"`
@@ -15,6 +16,7 @@ type User struct {
 	CreatedAt    string  `json:"created_at"`
 }
 
+// Profile is the public-facing subset of a User, safe to expose to other users.
 type Profile struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
@@ -23,6 +25,7 @@ type Profile struct {
 	CreatedAt   string `json:"created_at"`
 }
 
+// Payment records a single monetary transfer between two accounts, including BNPL master loan records.
 type Payment struct {
 	ID                string  `json:"id"`
 	SenderID          string  `json:"sender_id"`
@@ -36,11 +39,13 @@ type Payment struct {
 	CreatedAt         string  `json:"created_at"`
 }
 
+// PaymentWithInstallments bundles a master payment record with its full installment schedule.
 type PaymentWithInstallments struct {
 	Payment      Payment       `json:"payment"`
 	Installments []Installment `json:"installment"`
 }
 
+// PaymentRequest represents a pending demand from one user asking another to send money.
 type PaymentRequest struct {
 	ID          string  `json:"id"`
 	RequesterID string  `json:"requester_id"`
@@ -51,6 +56,7 @@ type PaymentRequest struct {
 	CreatedAt   string  `json:"created_at"`
 }
 
+// Installment represents a single scheduled repayment slice within a BNPL loan plan.
 type Installment struct {
 	ID           string  `json:"id"`
 	PaymentID    string  `json:"payment_id"`
@@ -61,6 +67,7 @@ type Installment struct {
 	CreatedAt    string  `json:"created_at"`
 }
 
+// FriendRequest represents a pending social connection request between two users.
 type FriendRequest struct {
 	ID         string `json:"id"`
 	SenderID   string `json:"sender_id"`
@@ -68,6 +75,7 @@ type FriendRequest struct {
 	CreatedAt  string `json:"created_at"`
 }
 
+// Group represents a named collection of users for shared billing and payment splitting.
 type Group struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
@@ -75,12 +83,14 @@ type Group struct {
 	CreatedAt string `json:"created_at"`
 }
 
+// GroupMember records the membership relationship between a user and a group.
 type GroupMember struct {
 	GroupID  string `json:"group_id"`
 	MemberID string `json:"member_id"`
 	JoinedAt string `json:"joined_at"`
 }
 
+// GroupInvitation represents a pending invite sent by a group member to an outside user.
 type GroupInvitation struct {
 	ID         string `json:"id"`
 	GroupID    string `json:"group_id"`
@@ -89,6 +99,7 @@ type GroupInvitation struct {
 	CreatedAt  string `json:"created_at"`
 }
 
+// Notification represents an in-app alert delivered to a user for events like payments or friend requests.
 type Notification struct {
 	ID        string `json:"id"`
 	UserID    string `json:"user_id"`
@@ -100,6 +111,7 @@ type Notification struct {
 	CreatedAt string `json:"created_at"`
 }
 
+// UserSettings holds per-user preference and privacy configuration stored in the user_settings table.
 type UserSettings struct {
 	UserID             string    `json:"user_id"`
 	Theme              string    `json:"theme"`

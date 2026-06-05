@@ -10,6 +10,9 @@ import (
 	"github.com/connorpodea/splitit/internal/models"
 )
 
+// CreateBNPLLoan initiates a full buy-now-pay-later loan: validates the buyer's credit limit,
+// calculates the fee-adjusted repayment schedule, funds the merchant via the app treasury,
+// collects the down payment, and generates the installment calendar rows.
 func (s *Store) CreateBNPLLoan(payment *models.Payment) error {
 	if payment.TotalInstallments == 0 {
 		return fmt.Errorf("credit engine processing aborted: total plan financing installments cannot be evaluated at zero")
@@ -148,6 +151,8 @@ func (s *Store) CreateBNPLLoan(payment *models.Payment) error {
 	return nil
 }
 
+// CalculateFeeRate returns the interest fee multiplier for a BNPL loan based on the buyer's
+// credit score. Higher scores qualify for lower rates.
 func (s *Store) CalculateFeeRate(creditScore uint8) float64 {
 	// Returns a fee multiplier based on the buyer's credit health score
 	switch {
@@ -162,6 +167,9 @@ func (s *Store) CalculateFeeRate(creditScore uint8) float64 {
 	}
 }
 
+// PayInstallment settles a single installment payment: verifies buyer funds, deducts the balance,
+// credits the treasury, marks the installment paid, adjusts the credit score for on-time or late
+// payment, and closes the loan if all installments are now cleared — all in one atomic transaction.
 func (s *Store) PayInstallment(installmentID, paymentID, userID string, amount float64) error {
 	transaction, err := s.db.Begin()
 	if err != nil {
@@ -346,6 +354,7 @@ func (s *Store) PayInstallment(installmentID, paymentID, userID string, amount f
 	return nil
 }
 
+// ListInstallments retrieves the full installment debt schedule for a user, ordered by due date ascending.
 func (s *Store) ListInstallments(userID string) ([]models.Installment, error) {
 	query := `
 	SELECT id, payment_id, user_id, amount, due_date, is_paid, created_at
@@ -391,6 +400,8 @@ func (s *Store) ListInstallments(userID string) ([]models.Installment, error) {
 	return installments, nil
 }
 
+// ListOverdueInstallments retrieves all unpaid installments whose due date has already passed,
+// ordered by due date ascending.
 func (s *Store) ListOverdueInstallments(userID string) ([]models.Installment, error) {
 	query := `
 	SELECT id, payment_id, user_id, amount, due_date, is_paid, created_at
@@ -437,6 +448,8 @@ func (s *Store) ListOverdueInstallments(userID string) ([]models.Installment, er
 	return installments, nil
 }
 
+// GetPaymentWithInstallments fetches a master payment record alongside its full installment
+// schedule in a single composite response.
 func (s *Store) GetPaymentWithInstallments(paymentID string) (*models.PaymentWithInstallments, error) {
 	query := `
 	SELECT id, sender_id, receiver_id, amount, total_amount, note, payment_type, total_installments, status, created_at
