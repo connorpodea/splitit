@@ -76,6 +76,33 @@ func (s *Store) CreateLinkedCard(card *models.LinkedCard) error {
 // DeleteLinkedCard severs an active linked card reference row, restricting the operation
 // to the card owner via dual key constraint enforcement.
 func (s *Store) DeleteLinkedCard(cardID, userID string) error {
+	query := `
+    DELETE FROM linked_cards
+    WHERE id = ? AND user_id = ?;`
+
+	transaction, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to open transaction context for asset severance: %w", err)
+	}
+	defer transaction.Rollback()
+
+	result, err := transaction.Exec(query, cardID, userID)
+	if err != nil {
+		return fmt.Errorf("failed to execute card deletion routine for asset ID '%s' under user '%s': %w", cardID, userID, err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to read execution state metrics: %w", err)
+	}
+	if rowsAffected == 0 {
+		return fmt.Errorf("card severance rejected: asset ID '%s' not found or unauthorized for user '%s'", cardID, userID)
+	}
+
+	if err = transaction.Commit(); err != nil {
+		return fmt.Errorf("critical engine tracking mismatch: failed to finalize card deletion on disk commit: %w", err)
+	}
+
 	return nil
 }
 
