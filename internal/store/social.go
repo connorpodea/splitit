@@ -19,7 +19,8 @@ func (s *Store) SendFriendRequest(request *models.FriendRequest) error {
 	if err != nil {
 		return fmt.Errorf("failed to insert pending relationship record for invitation request ID '%s': %w", request.ID, err)
 	}
-	s.CreateNotification(&models.Notification{
+	// Dispatch the notification in a goroutine so it doesn't block the friend request response
+	go s.CreateNotification(&models.Notification{
 		UserID:   request.ReceiverID,
 		Type:     "friend_request",
 		Title:    "New friend request",
@@ -129,7 +130,8 @@ func (s *Store) AcceptFriendRequest(requestID, receiverID string) error {
 	if err = transaction.Commit(); err != nil {
 		return fmt.Errorf("friend request acceptance failed: database transaction failed to commit to disk: %w", err)
 	}
-	s.CreateNotification(&models.Notification{
+	// Dispatch the notification in a goroutine so it doesn't block the acceptance response
+	go s.CreateNotification(&models.Notification{
 		UserID:   senderID,
 		Type:     "friend_accepted",
 		Title:    "Friend request accepted",

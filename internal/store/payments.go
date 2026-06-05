@@ -71,7 +71,8 @@ func (s *Store) Pay(payment *models.Payment) error {
 		return fmt.Errorf("critical engine tracking mismatch: failed to write block modifications to disk on final commit sequence: %w", err)
 	}
 
-	s.CreateNotification(&models.Notification{
+	// Dispatch the notification in a goroutine so it doesn't block the payment response
+	go s.CreateNotification(&models.Notification{
 		UserID:   payment.ReceiverID,
 		Type:     "payment_received",
 		Title:    "Payment received",
@@ -175,7 +176,8 @@ func (s *Store) CreatePaymentRequest(request *models.PaymentRequest) error {
 	if err != nil {
 		return fmt.Errorf("failed to push open payment demand requisition with invoice ID '%s' into table ledgers: %w", request.ID, err)
 	}
-	s.CreateNotification(&models.Notification{
+	// Dispatch the notification in a goroutine so it doesn't block the request response
+	go s.CreateNotification(&models.Notification{
 		UserID:   request.PayerID,
 		Type:     "payment_request",
 		Title:    "Payment request",

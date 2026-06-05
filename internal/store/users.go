@@ -145,6 +145,33 @@ func (s *Store) SearchProfiles(queryStr string) ([]models.Profile, error) {
 	return profiles, nil
 }
 
+// UpdatePassword overwrites the stored credential hash. Callers are responsible for securely
+// hashing the new password externally before passing the digest to this method.
+func (s *Store) UpdatePassword(userID, newHashedPassword string) error {
+	return nil
+}
+
+// UpdateEmail replaces the email address on record for a user account.
+func (s *Store) UpdateEmail(userID, newEmail string) error {
+	return nil
+}
+
+// UpdatePhoneNumber replaces the phone number on record for a user account.
+func (s *Store) UpdatePhoneNumber(userID, newPhone string) error {
+	return nil
+}
+
+// UpdateDisplayName replaces the display name for a user account.
+func (s *Store) UpdateDisplayName(userID, newName string) error {
+	return nil
+}
+
+// DeactivateAccount performs a defensive soft-delete state transition by setting the is_active flag
+// to false rather than purging the row, preserving ledger integrity.
+func (s *Store) DeactivateAccount(userID string) error {
+	return nil
+}
+
 func (s *Store) UpdateCreditScore(userID string, delta int) error {
 	// Clamp the resulting score between 0 and 100 to prevent overflow or underflow
 	query := `

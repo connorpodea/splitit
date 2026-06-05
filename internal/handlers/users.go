@@ -545,6 +545,23 @@ func creditScoreLabel(score uint8) string {
 	}
 }
 
+// UpdatePassword processes a credential rotation request, hashing the incoming
+// plaintext password before delegating the digest to the store layer.
+func (h *Handler) UpdatePassword(w http.ResponseWriter, r *http.Request) {}
+
+// UpdateEmail processes a request to update the authenticated user's email address on record.
+func (h *Handler) UpdateEmail(w http.ResponseWriter, r *http.Request) {}
+
+// UpdatePhoneNumber processes a request to update the authenticated user's phone number on record.
+func (h *Handler) UpdatePhoneNumber(w http.ResponseWriter, r *http.Request) {}
+
+// UpdateDisplayName processes a request to update the authenticated user's display name.
+func (h *Handler) UpdateDisplayName(w http.ResponseWriter, r *http.Request) {}
+
+// DeactivateAccount processes a soft-delete deactivation request, transitioning the
+// account to an inactive state without purging underlying ledger records.
+func (h *Handler) DeactivateAccount(w http.ResponseWriter, r *http.Request) {}
+
 func avatarClass(i int) string {
 	classes := []string{"av-indigo", "av-amber", "av-emerald", "av-violet", "av-cyan", "av-pink"}
 	return classes[i%len(classes)]

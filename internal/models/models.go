@@ -106,3 +106,64 @@ type UserSettings struct {
 	IsDiscoverable     bool      `json:"is_discoverable"`
 	UpdatedAt          time.Time `json:"updated_at"`
 }
+
+// SpendingTotals aggregates directional cash flow metrics across a bounded time window for a single account.
+type SpendingTotals struct {
+	TotalSent     float64 `json:"total_sent"`
+	TotalReceived float64 `json:"total_received"`
+	Net           float64 `json:"net"`
+}
+
+// MonthlySummary captures aggregated financial activity for a single calendar billing month.
+type MonthlySummary struct {
+	Year              int        `json:"year"`
+	Month             time.Month `json:"month"`
+	TotalOut          float64    `json:"total_out"`
+	TotalIn           float64    `json:"total_in"`
+	ActiveBNPLCharges float64    `json:"active_bnpl_charges"`
+}
+
+// TopRecipient pairs a peer identity with the total volume of funds directed toward them.
+type TopRecipient struct {
+	Profile   Profile `json:"profile"`
+	TotalSent float64 `json:"total_sent"`
+}
+
+// CreditScoreLog records a single audit checkpoint in a user's credit score history.
+// Backed by the credit_score_log table.
+type CreditScoreLog struct {
+	ID        string    `json:"id"`
+	UserID    string    `json:"user_id"`
+	Score     int       `json:"score"`
+	Delta     int       `json:"delta"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// InstallmentSummary provides a consolidated snapshot of a user's installment plan portfolio.
+type InstallmentSummary struct {
+	TotalSettled     float64 `json:"total_settled"`
+	TotalOutstanding float64 `json:"total_outstanding"`
+	TotalOverdue     float64 `json:"total_overdue"`
+}
+
+// LinkedCard represents a tokenized external funding instrument registered to a user account.
+// Raw card numbers are never stored — only opaque provider token references.
+type LinkedCard struct {
+	ID        string `json:"id"`
+	UserID    string `json:"user_id"`
+	TokenRef  string `json:"token_ref"`
+	Last4     string `json:"last4"`
+	Brand     string `json:"brand"`
+	IsDefault bool   `json:"is_default"`
+	CreatedAt string `json:"created_at"`
+}
+
+// WalletTx records an absolute balance mutation event (deposit or withdrawal) on a user account.
+// Distinct from peer-to-peer Payment records in the payments ledger.
+type WalletTx struct {
+	ID        string  `json:"id"`
+	UserID    string  `json:"user_id"`
+	Type      string  `json:"type"` // "deposit" | "withdrawal"
+	Amount    float64 `json:"amount"`
+	CreatedAt string  `json:"created_at"`
+}
