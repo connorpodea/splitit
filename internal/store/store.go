@@ -117,6 +117,7 @@ func (s *Store) createTables() error {
 		amount_cents INTEGER NOT NULL,
 		due_date TEXT NOT NULL,
 		is_paid INTEGER NOT NULL DEFAULT 0,
+		penalty_applied INTEGER NOT NULL DEFAULT 0,
 		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		FOREIGN KEY (payment_id) REFERENCES payments (id),
 		FOREIGN KEY (user_id) REFERENCES users (id)
@@ -273,7 +274,22 @@ func (s *Store) createTables() error {
 		id TEXT PRIMARY KEY,
 		user_id TEXT NOT NULL,
 		credit_score INTEGER NOT NULL,
-		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+	);`
+
+	_, err = s.db.Exec(query)
+	if err != nil {
+		return err
+	}
+
+	query = `
+	CREATE TABLE IF NOT EXISTS credit_score_log (
+		id TEXT PRIMARY KEY,
+		user_id TEXT NOT NULL,
+		score INTEGER NOT NULL,
+		delta INTEGER NOT NULL,
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
 	);`
 

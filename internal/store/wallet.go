@@ -7,6 +7,8 @@ import (
 	"github.com/connorpodea/splitit/internal/models"
 )
 
+const overdueScorePenalty = 10
+
 // GetSpendingTotals computes total sent, total received, and net cash flow
 // for a user across a caller-specified time window.
 func (s *Store) GetSpendingTotals(userID string, since time.Time) (*models.SpendingTotals, error) {
@@ -245,29 +247,179 @@ func (s *Store) ListWalletTransactions(userID string) ([]models.WalletTransactio
 // GetMonthlySpendingSummary calculates absolute outflow, inflow, and active BNPL charge totals
 // for a specific calendar billing month.
 func (s *Store) GetMonthlySpendingSummary(userID string, year int, month time.Month) (*models.MonthlySummary, error) {
-	return nil, nil
+	startDate := fmt.Sprintf("%04d-%02d-01", year, int(month))
+	endDate := time.Date(year, month+1, 1, 0, 0, 0, 0, time.UTC).Format("2006-01-02")
+
+	flowQuery := `
+	SELECT
+		COALESCE(SUM(CASE WHEN sender_id = ? THEN amount_cents ELSE 0 END), 0) AS total_out_cents,
+		COALESCE(SUM(CASE WHEN receiver_id = ? THEN amount_cents ELSE 0 END), 0) AS total_in_cents
+	FROM payments
+	WHERE (sender_id = ? OR receiver_id = ?) AND created_at >= ? AND created_at < ?;`
+
+	var totalOutCents, totalInCents int
+	err := s.db.QueryRow(flowQuery, userID, userID, userID, userID, startDate, endDate).
+		Scan(&totalOutCents, &totalInCents)
+	if err != nil {
+		return nil, fmt.Errorf("failed to aggregate payment flow totals for user '%s' in %04d-%02d: %w", userID, year, int(month), err)
+	}
+
+	bnplQuery := `
+	SELECT COALESCE(SUM(amount_cents), 0)
+	FROM installments
+	WHERE user_id = ? AND due_date >= ? AND due_date < ?;`
+
+	var activeBNPLCents int
+	err = s.db.QueryRow(bnplQuery, userID, startDate, endDate).Scan(&activeBNPLCents)
+	if err != nil {
+		return nil, fmt.Errorf("failed to aggregate active BNPL installment charges for user '%s' in %04d-%02d: %w", userID, year, int(month), err)
+	}
+
+	return &models.MonthlySummary{
+		Year:                   year,
+		Month:                  month,
+		TotalOutCents:          totalOutCents,
+		TotalInCents:           totalInCents,
+		ActiveBNPLChargesCents: activeBNPLCents,
+	}, nil
 }
 
 // GetTopRecipients ranks the user's peer-to-peer transfer targets by total funds directed toward them
 // within a bounded time window, limited to the top N results.
 func (s *Store) GetTopRecipients(userID string, limit int, since time.Time) ([]models.TopRecipient, error) {
-	return nil, nil
+	sinceStr := since.Format("2006-01-02")
+
+	query := `
+	SELECT u.id, u.name, u.email, u.phone_number, u.created_at,
+		COALESCE(SUM(p.amount_cents), 0) AS total_sent_cents
+	FROM payments p
+	JOIN users u ON u.id = p.receiver_id
+	WHERE p.sender_id = ? AND p.created_at >= ?
+	GROUP BY p.receiver_id
+	ORDER BY total_sent_cents DESC
+	LIMIT ?;`
+
+	rows, err := s.db.Query(query, userID, sinceStr, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to compute top recipient rankings for user '%s': %w", userID, err)
+	}
+	defer rows.Close()
+
+	recipients := []models.TopRecipient{}
+
+	for rows.Next() {
+		var r models.TopRecipient
+		err = rows.Scan(
+			&r.Profile.ID,
+			&r.Profile.Name,
+			&r.Profile.Email,
+			&r.Profile.PhoneNumber,
+			&r.Profile.CreatedAt,
+			&r.TotalSentCents,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan top recipient row into result struct: %w", err)
+		}
+		recipients = append(recipients, r)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("detected stream cursor failure during top recipient iteration for user '%s': %w", userID, err)
+	}
+
+	return recipients, nil
 }
 
 // GetBNPLUtilization returns a ratio representing the user's current outstanding installment debt
 // relative to their master credit limit ceiling.
 func (s *Store) GetBNPLUtilization(userID string) (float64, error) {
-	return 0, nil
+	outstandingQuery := `
+	SELECT COALESCE(SUM(amount_cents), 0)
+	FROM installments
+	WHERE user_id = ? AND is_paid = 0;`
+
+	var outstandingCents int
+	err := s.db.QueryRow(outstandingQuery, userID).Scan(&outstandingCents)
+	if err != nil {
+		return 0, fmt.Errorf("failed to aggregate outstanding installment balance for user '%s': %w", userID, err)
+	}
+
+	limitQuery := `SELECT credit_limit_cents FROM users WHERE id = ?;`
+
+	var creditLimitCents int
+	err = s.db.QueryRow(limitQuery, userID).Scan(&creditLimitCents)
+	if err != nil {
+		return 0, fmt.Errorf("failed to retrieve credit limit ceiling for user '%s': %w", userID, err)
+	}
+
+	if creditLimitCents == 0 {
+		return 0, nil
+	}
+
+	return float64(outstandingCents) / float64(creditLimitCents), nil
 }
 
 // GetCreditScoreHistory fetches the chronological audit log of credit score variation events
 // for a user from the credit_score_log tracking table.
 func (s *Store) GetCreditScoreHistory(userID string) ([]models.CreditScoreLog, error) {
-	return nil, nil
+	query := `
+	SELECT id, user_id, score, delta, created_at
+	FROM credit_score_log
+	WHERE user_id = ?
+	ORDER BY created_at ASC;`
+
+	rows, err := s.db.Query(query, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract credit score audit log for user '%s': %w", userID, err)
+	}
+	defer rows.Close()
+
+	logs := []models.CreditScoreLog{}
+
+	for rows.Next() {
+		var entry models.CreditScoreLog
+		err = rows.Scan(
+			&entry.ID,
+			&entry.UserID,
+			&entry.Score,
+			&entry.Delta,
+			&entry.CreatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan credit score log row into audit struct: %w", err)
+		}
+		logs = append(logs, entry)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("detected stream cursor failure during credit score history iteration for user '%s': %w", userID, err)
+	}
+
+	return logs, nil
 }
 
 // GetInstallmentSummary pulls combined installment portfolio metrics — total settled,
 // total outstanding, and total overdue amounts — in a single query execution.
 func (s *Store) GetInstallmentSummary(userID string) (*models.InstallmentSummary, error) {
-	return nil, nil
+	today := time.Now().Format("2006-01-02")
+
+	query := `
+	SELECT
+		COALESCE(SUM(CASE WHEN is_paid = 1 THEN amount_cents ELSE 0 END), 0) AS total_settled_cents,
+		COALESCE(SUM(CASE WHEN is_paid = 0 AND due_date >= ? THEN amount_cents ELSE 0 END), 0) AS total_outstanding_cents,
+		COALESCE(SUM(CASE WHEN is_paid = 0 AND due_date < ? THEN amount_cents ELSE 0 END), 0) AS total_overdue_cents
+	FROM installments
+	WHERE user_id = ?;`
+
+	var summary models.InstallmentSummary
+	err := s.db.QueryRow(query, today, today, userID).Scan(
+		&summary.TotalSettledCents,
+		&summary.TotalOutstandingCents,
+		&summary.TotalOverdueCents,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to aggregate installment portfolio metrics for user '%s': %w", userID, err)
+	}
+
+	return &summary, nil
 }

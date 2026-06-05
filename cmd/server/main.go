@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/connorpodea/splitit/internal/handlers"
 	"github.com/connorpodea/splitit/internal/store"
@@ -17,7 +18,16 @@ func main() {
 	}
 	log.Println("[INFO] SQLite storage engine initialized successfully")
 
-	// 2. CONTROLLER LAYER
+	// 2. OVERDUE PENALTY SCHEDULER
+	go func() {
+		for range time.NewTicker(24 * time.Hour).C {
+			if err := s.ApplyMonthlyOverduePenalties(); err != nil {
+				log.Printf("[WARN] Overdue penalty cycle failed: %v", err)
+			}
+		}
+	}()
+
+	// 3. CONTROLLER LAYER
 	h := handlers.New(s)
 
 	// 3. ROUTING REGISTRATION
@@ -73,32 +83,3 @@ func main() {
 		log.Fatalf("[CRITICAL] HTTP network server collapsed: %v", err)
 	}
 }
-
-// split features
-
-// GetSpendingTotals(userID, since time.Time) — total sent, total received, net over a time window
-// ListPaymentsByUser(userID) — full payment history (both sent and received), for a feed
-// ListPaymentsBetweenUsers(userID, otherID) — all transactions between two specific people
-// GetMonthlySpendingSummary(userID, year, month) — total out, total in, BNPL charges for a given month
-// GetTopRecipients(userID, limit, since) — who you've paid the most, ranked
-// GetBNPLUtilization(userID) — outstanding balance vs credit limit as a ratio
-// GetCreditScoreHistory(userID) — would require a new credit_score_log table to track changes over time
-// GetInstallmentSummary(userID) — total paid, total remaining, overdue amount, all in one query
-
-// Deposit(userID, amount) — add funds directly to balance
-// Withdraw(userID, amount) — cash out, with balance check
-// CreateLinkedCard(card *models.LinkedCard) — store a card (tokenized, never raw numbers)
-// DeleteLinkedCard(cardID, userID) — remove a card
-// ListLinkedCards(userID) — get all cards on file
-// GetLinkedCard(cardID, userID)
-// SetDefaultCard(cardID, userID) — mark one card as the default funding source
-// ListWalletTransactions(userID) — deposits and withdrawals only, separate from p2p payments
-// UpdateUsername(userID, newUsername) — with uniqueness check
-// UpdatePassword(userID, newHashedPassword) — caller hashes before passing
-// UpdateEmail(userID, newEmail)
-// UpdatePhoneNumber(userID, newPhone)
-// UpdateDisplayName(userID, newName)
-// DeactivateAccount(userID) — soft delete, sets an is_active flag rather than hard deleting
-// GetUserSettings(userID) — pull a settings row (separate table from users)
-
-// UpsertUserSettings(settings *models.UserSettings) — save UI/preference settings

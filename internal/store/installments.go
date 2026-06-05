@@ -514,3 +514,80 @@ func (s *Store) GetPaymentWithInstallments(paymentID string) (*models.PaymentWit
 	}
 	return &pwi, nil
 }
+
+// ApplyMonthlyOverduePenalties checks for past-due unpaid installments, reduces the user's credit score,
+// and records the penalty events in the credit score log history.
+func (s *Store) ApplyMonthlyOverduePenalties() error {
+	today := time.Now().Format("2006-01-02")
+
+	// Collect the distinct set of users who have new overdue installments not yet penalized.
+	userQuery := `
+	SELECT DISTINCT user_id
+	FROM installments
+	WHERE is_paid = 0 AND due_date < ? AND penalty_applied = 0;`
+
+	userRows, err := s.db.Query(userQuery, today)
+	if err != nil {
+		return fmt.Errorf("failed to scan delinquent user population for overdue penalty cycle: %w", err)
+	}
+	defer userRows.Close()
+
+	var affectedUserIDs []string
+	for userRows.Next() {
+		var uid string
+		if err = userRows.Scan(&uid); err != nil {
+			return fmt.Errorf("failed to scan delinquent user ID row: %w", err)
+		}
+		affectedUserIDs = append(affectedUserIDs, uid)
+	}
+	if err = userRows.Err(); err != nil {
+		return fmt.Errorf("detected stream cursor failure during delinquent user population scan: %w", err)
+	}
+
+	for _, userID := range affectedUserIDs {
+		tx, err := s.db.Begin()
+		if err != nil {
+			return fmt.Errorf("failed to open transaction context for overdue penalty on user '%s': %w", userID, err)
+		}
+		defer tx.Rollback()
+
+		// Clamp credit score to 0 floor and capture the resulting score after penalty.
+		scoreQuery := `
+		UPDATE users
+		SET credit_score = MAX(0, credit_score - ?)
+		WHERE id = ?;`
+
+		if _, err = tx.Exec(scoreQuery, overdueScorePenalty, userID); err != nil {
+			return fmt.Errorf("failed to apply overdue credit score penalty for user '%s': %w", userID, err)
+		}
+
+		var newScore int
+		if err = tx.QueryRow(`SELECT credit_score FROM users WHERE id = ?`, userID).Scan(&newScore); err != nil {
+			return fmt.Errorf("failed to read post-penalty credit score for user '%s': %w", userID, err)
+		}
+
+		logQuery := `
+		INSERT INTO credit_score_log (id, user_id, score, delta)
+		VALUES (?, ?, ?, ?);`
+
+		if _, err = tx.Exec(logQuery, create_new_ID(), userID, newScore, -overdueScorePenalty); err != nil {
+			return fmt.Errorf("failed to write overdue penalty audit event to credit score log for user '%s': %w", userID, err)
+		}
+
+		// Mark all newly penalized overdue installments so they are not double-penalized on future runs.
+		markQuery := `
+		UPDATE installments
+		SET penalty_applied = 1
+		WHERE user_id = ? AND is_paid = 0 AND due_date < ? AND penalty_applied = 0;`
+
+		if _, err = tx.Exec(markQuery, userID, today); err != nil {
+			return fmt.Errorf("failed to mark overdue installments as penalized for user '%s': %w", userID, err)
+		}
+
+		if err = tx.Commit(); err != nil {
+			return fmt.Errorf("critical engine mismatch: failed to commit overdue penalty transaction for user '%s': %w", userID, err)
+		}
+	}
+
+	return nil
+}
