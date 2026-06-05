@@ -366,7 +366,15 @@ func (s *Store) ListInstallments(userID string) ([]models.Installment, error) {
 		var installment models.Installment
 		var isPaidInt int
 
-		err = rows.Scan(&installment.ID, &installment.PaymentID, &installment.UserWithDebt, &installment.Amount, &installment.DueDate, &isPaidInt, &installment.CreatedAt)
+		err = rows.Scan(
+			&installment.ID,
+			&installment.PaymentID,
+			&installment.UserWithDebt,
+			&installment.Amount,
+			&installment.DueDate,
+			&isPaidInt,
+			&installment.CreatedAt,
+		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to deserialize installment row into debt schedule model structure: %w", err)
 		}
@@ -404,7 +412,15 @@ func (s *Store) ListOverdueInstallments(userID string) ([]models.Installment, er
 		var installment models.Installment
 		var isPaidInt int
 
-		err = rows.Scan(&installment.ID, &installment.PaymentID, &installment.UserWithDebt, &installment.Amount, &installment.DueDate, &isPaidInt, &installment.CreatedAt)
+		err = rows.Scan(
+			&installment.ID,
+			&installment.PaymentID,
+			&installment.UserWithDebt,
+			&installment.Amount,
+			&installment.DueDate,
+			&isPaidInt,
+			&installment.CreatedAt,
+		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to deserialize overdue installment row into debt schedule model structure: %w", err)
 		}
@@ -439,7 +455,8 @@ func (s *Store) GetPaymentWithInstallments(paymentID string) (*models.PaymentWit
 		&pwi.Payment.PaymentType,
 		&pwi.Payment.TotalInstallments,
 		&pwi.Payment.Status,
-		&pwi.Payment.CreatedAt)
+		&pwi.Payment.CreatedAt,
+	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, fmt.Errorf("payment transaction record ID '%s' not found: %w", paymentID, err)
@@ -463,9 +480,17 @@ func (s *Store) GetPaymentWithInstallments(paymentID string) (*models.PaymentWit
 
 	for rows.Next() {
 		var i models.Installment
-		var isPaidInt int // Intermediary variable to scan SQLite 0/1 integer flags safely
+		var isPaidInt int
 
-		err = rows.Scan(&i.ID, &i.PaymentID, &i.UserWithDebt, &i.Amount, &i.DueDate, &isPaidInt, &i.CreatedAt)
+		err = rows.Scan(
+			&i.ID,
+			&i.PaymentID,
+			&i.UserWithDebt,
+			&i.Amount,
+			&i.DueDate,
+			&isPaidInt,
+			&i.CreatedAt,
+		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to unpack individual installment schedule row segment: %w", err)
 		}

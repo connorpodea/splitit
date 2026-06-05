@@ -43,7 +43,16 @@ func (s *Store) ListNotifications(userID string) ([]models.Notification, error) 
 		var n models.Notification
 		var isSeen int
 
-		err = rows.Scan(&n.ID, &n.UserID, &n.Type, &n.Title, &n.Body, &n.LinkView, &isSeen, &n.CreatedAt)
+		err = rows.Scan(
+			&n.ID,
+			&n.UserID,
+			&n.Type,
+			&n.Title,
+			&n.Body,
+			&n.LinkView,
+			&isSeen,
+			&n.CreatedAt,
+		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to deserialize notification row into model structure for user ID '%s': %w", userID, err)
 		}

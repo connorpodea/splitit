@@ -28,7 +28,17 @@ func (s *Store) GetUser(userID string) (*models.User, error) {
 	WHERE id = ?;`
 	var user models.User
 
-	err := s.db.QueryRow(query, userID).Scan(&user.ID, &user.PasswordHash, &user.Name, &user.Email, &user.PhoneNumber, &user.Balance, &user.CreditScore, &user.CreditLimit, &user.CreatedAt)
+	err := s.db.QueryRow(query, userID).Scan(
+		&user.ID,
+		&user.PasswordHash,
+		&user.Name,
+		&user.Email,
+		&user.PhoneNumber,
+		&user.Balance,
+		&user.CreditScore,
+		&user.CreditLimit,
+		&user.CreatedAt,
+	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, fmt.Errorf("user account not found for ID '%s': %w", userID, err)
@@ -46,7 +56,13 @@ func (s *Store) GetProfile(id string) (*models.Profile, error) {
 	WHERE id = ?;`
 	var profile models.Profile
 
-	err := s.db.QueryRow(query, id).Scan(&profile.ID, &profile.Name, &profile.Email, &profile.PhoneNumber, &profile.CreatedAt)
+	err := s.db.QueryRow(query, id).Scan(
+		&profile.ID,
+		&profile.Name,
+		&profile.Email,
+		&profile.PhoneNumber,
+		&profile.CreatedAt,
+	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, fmt.Errorf("profile not found for user ID '%s': %w", id, err)
@@ -74,7 +90,16 @@ func (s *Store) ListUsers() ([]models.User, error) {
 	for rows.Next() {
 		var u models.User
 
-		err := rows.Scan(&u.ID, &u.Name, &u.Email, &u.PhoneNumber, &u.Balance, &u.CreditScore, &u.CreditLimit, &u.CreatedAt)
+		err := rows.Scan(
+			&u.ID,
+			&u.Name,
+			&u.Email,
+			&u.PhoneNumber,
+			&u.Balance,
+			&u.CreditScore,
+			&u.CreditLimit,
+			&u.CreatedAt,
+		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan row into user data struct during list aggregation: %w", err)
 		}
@@ -105,7 +130,13 @@ func (s *Store) ListProfiles() ([]models.Profile, error) {
 	for rows.Next() {
 		var profile models.Profile
 
-		err := rows.Scan(&profile.ID, &profile.Name, &profile.Email, &profile.PhoneNumber, &profile.CreatedAt)
+		err := rows.Scan(
+			&profile.ID,
+			&profile.Name,
+			&profile.Email,
+			&profile.PhoneNumber,
+			&profile.CreatedAt,
+		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan matching profile data mapping structure: %w", err)
 		}
@@ -139,7 +170,13 @@ func (s *Store) SearchProfiles(queryStr string) ([]models.Profile, error) {
 
 	for rows.Next() {
 		var p models.Profile
-		err = rows.Scan(&p.ID, &p.Name, &p.Email, &p.PhoneNumber, &p.CreatedAt)
+		err = rows.Scan(
+			&p.ID,
+			&p.Name,
+			&p.Email,
+			&p.PhoneNumber,
+			&p.CreatedAt,
+		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan matching profile search record row: %w", err)
 		}
@@ -156,21 +193,92 @@ func (s *Store) SearchProfiles(queryStr string) ([]models.Profile, error) {
 // UpdatePassword overwrites the stored credential hash. Callers are responsible for securely
 // hashing the new password externally before passing the digest to this method.
 func (s *Store) UpdatePassword(userID, newHashedPassword string) error {
+	query := `
+	UPDATE users
+	SET password_hash = ?
+	WHERE id = ?;`
+
+	result, err := s.db.Exec(query, newHashedPassword, userID)
+	if err != nil {
+		return fmt.Errorf("failed to execute credential mutation segment for user ID '%s': %w", userID, err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to read credential update metrics: %w", err)
+	}
+	if rowsAffected == 0 {
+		return fmt.Errorf("credential mutation rejected: user ID '%s' not found", userID)
+	}
+
 	return nil
 }
 
 // UpdateEmail replaces the email address on record for a user account.
 func (s *Store) UpdateEmail(userID, newEmail string) error {
+	query := `
+    UPDATE users
+    SET email = ?
+    WHERE id = ?;`
+
+	result, err := s.db.Exec(query, newEmail, userID)
+	if err != nil {
+		return fmt.Errorf("failed to execute email mutation segment for user ID '%s': %w", userID, err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to read email update execution state metrics: %w", err)
+	}
+	if rowsAffected == 0 {
+		return fmt.Errorf("email mutation rejected: user ID '%s' not found", userID)
+	}
+
 	return nil
 }
 
 // UpdatePhoneNumber replaces the phone number on record for a user account.
-func (s *Store) UpdatePhoneNumber(userID, newPhone string) error {
+func (s *Store) UpdatePhoneNumber(userID, newPhoneNumber string) error {
+	query := `
+    UPDATE users
+    SET phone_number = ?
+    WHERE id = ?;`
+
+	result, err := s.db.Exec(query, newPhoneNumber, userID)
+	if err != nil {
+		return fmt.Errorf("failed to execute phone number mutation segment for user ID '%s': %w", userID, err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to read phone number update execution state metrics: %w", err)
+	}
+	if rowsAffected == 0 {
+		return fmt.Errorf("phone number mutation rejected: user ID '%s' not found", userID)
+	}
+
 	return nil
 }
 
 // UpdateDisplayName replaces the display name for a user account.
 func (s *Store) UpdateDisplayName(userID, newName string) error {
+	query := `
+	UPDATE users
+	SET name = ?
+	WHERE id = ?;`
+
+	result, err := s.db.Exec(query, newName, userID)
+	if err != nil {
+		return err
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return fmt.Errorf("")
+	}
 	return nil
 }
 

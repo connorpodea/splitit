@@ -48,7 +48,12 @@ func (s *Store) ListIncomingFriendRequests(userID string) ([]models.FriendReques
 	for rows.Next() {
 		var r models.FriendRequest
 
-		err := rows.Scan(&r.ID, &r.SenderID, &r.ReceiverID, &r.CreatedAt)
+		err := rows.Scan(
+			&r.ID,
+			&r.SenderID,
+			&r.ReceiverID,
+			&r.CreatedAt,
+		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse incoming connection record sequence into target friend request model: %w", err)
 		}
@@ -80,7 +85,12 @@ func (s *Store) ListOutgoingFriendRequests(userID string) ([]models.FriendReques
 	for rows.Next() {
 		var r models.FriendRequest
 
-		err = rows.Scan(&r.ID, &r.SenderID, &r.ReceiverID, &r.CreatedAt)
+		err = rows.Scan(
+			&r.ID,
+			&r.SenderID,
+			&r.ReceiverID,
+			&r.CreatedAt,
+		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan matching outbound invitation row properties into model reference: %w", err)
 		}
@@ -221,7 +231,13 @@ func (s *Store) ListFriends(userID string) ([]models.Profile, error) {
 	for rows.Next() {
 		var friend models.Profile
 
-		err := rows.Scan(&friend.ID, &friend.Name, &friend.Email, &friend.PhoneNumber, &friend.CreatedAt)
+		err := rows.Scan(
+			&friend.ID,
+			&friend.Name,
+			&friend.Email,
+			&friend.PhoneNumber,
+			&friend.CreatedAt,
+		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to deserialize user profile attributes from friends table query data stream: %w", err)
 		}

@@ -106,7 +106,18 @@ func (s *Store) GetPayment(paymentID string) (*models.Payment, error) {
 
 	var payment models.Payment
 
-	err := s.db.QueryRow(query, paymentID).Scan(&payment.ID, &payment.SenderID, &payment.ReceiverID, &payment.Amount, &payment.TotalAmount, &payment.Note, &payment.PaymentType, &payment.TotalInstallments, &payment.Status, &payment.CreatedAt)
+	err := s.db.QueryRow(query, paymentID).Scan(
+		&payment.ID,
+		&payment.SenderID,
+		&payment.ReceiverID,
+		&payment.Amount,
+		&payment.TotalAmount,
+		&payment.Note,
+		&payment.PaymentType,
+		&payment.TotalInstallments,
+		&payment.Status,
+		&payment.CreatedAt,
+	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, fmt.Errorf("payment record not found for transaction ID '%s': %w", paymentID, err)
@@ -134,7 +145,18 @@ func (s *Store) ListPaymentsReceived(userID string) ([]models.Payment, error) {
 	for rows.Next() {
 		var p models.Payment
 
-		err = rows.Scan(&p.ID, &p.SenderID, &p.ReceiverID, &p.Amount, &p.TotalAmount, &p.Note, &p.PaymentType, &p.TotalInstallments, &p.Status, &p.CreatedAt)
+		err = rows.Scan(
+			&p.ID,
+			&p.SenderID,
+			&p.ReceiverID,
+			&p.Amount,
+			&p.TotalAmount,
+			&p.Note,
+			&p.PaymentType,
+			&p.TotalInstallments,
+			&p.Status,
+			&p.CreatedAt,
+		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to unpack settlement fields into internal payment history model array: %w", err)
 		}
@@ -166,7 +188,18 @@ func (s *Store) ListPaymentsSent(userID string) ([]models.Payment, error) {
 	for rows.Next() {
 		var p models.Payment
 
-		err = rows.Scan(&p.ID, &p.SenderID, &p.ReceiverID, &p.Amount, &p.TotalAmount, &p.Note, &p.PaymentType, &p.TotalInstallments, &p.Status, &p.CreatedAt)
+		err = rows.Scan(
+			&p.ID,
+			&p.SenderID,
+			&p.ReceiverID,
+			&p.Amount,
+			&p.TotalAmount,
+			&p.Note,
+			&p.PaymentType,
+			&p.TotalInstallments,
+			&p.Status,
+			&p.CreatedAt,
+		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to unpack settlement fields into internal payment history model array: %w", err)
 		}
@@ -224,7 +257,15 @@ func (s *Store) ListIncomingPaymentRequests(userID string) ([]models.PaymentRequ
 	for rows.Next() {
 		var r models.PaymentRequest
 
-		err = rows.Scan(&r.ID, &r.RequesterID, &r.PayerID, &r.Amount, &r.Note, &r.Status, &r.CreatedAt)
+		err = rows.Scan(
+			&r.ID,
+			&r.RequesterID,
+			&r.PayerID,
+			&r.Amount,
+			&r.Note,
+			&r.Status,
+			&r.CreatedAt,
+		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to unpack invoice variables into internal payment request structure array: %w", err)
 		}
@@ -256,7 +297,15 @@ func (s *Store) ListOutgoingPaymentRequests(userID string) ([]models.PaymentRequ
 	for rows.Next() {
 		var r models.PaymentRequest
 
-		err = rows.Scan(&r.ID, &r.RequesterID, &r.PayerID, &r.Amount, &r.Note, &r.Status, &r.CreatedAt)
+		err = rows.Scan(
+			&r.ID,
+			&r.RequesterID,
+			&r.PayerID,
+			&r.Amount,
+			&r.Note,
+			&r.Status,
+			&r.CreatedAt,
+		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to map outbound record fields safely to target collection model fields: %w", err)
 		}

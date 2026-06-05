@@ -61,7 +61,12 @@ func (s *Store) ListGroups(userID string) ([]models.Group, error) {
 	for rows.Next() {
 		var g models.Group
 
-		err = rows.Scan(&g.ID, &g.Name, &g.CreatorID, &g.CreatedAt)
+		err = rows.Scan(
+			&g.ID,
+			&g.Name,
+			&g.CreatorID,
+			&g.CreatedAt,
+		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan database group row into model properties: %w", err)
 		}
@@ -94,7 +99,13 @@ func (s *Store) ListGroupMembers(groupID string) ([]models.Profile, error) {
 	for rows.Next() {
 		var m models.Profile
 
-		err = rows.Scan(&m.ID, &m.Name, &m.Email, &m.PhoneNumber, &m.CreatedAt)
+		err = rows.Scan(
+			&m.ID,
+			&m.Name,
+			&m.Email,
+			&m.PhoneNumber,
+			&m.CreatedAt,
+		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to deserialize member profile record from group roster query for group ID '%s': %w", groupID, err)
 		}
@@ -216,7 +227,13 @@ func (s *Store) ListIncomingGroupInvitations(receiverID string) ([]models.GroupI
 	for rows.Next() {
 		var inv models.GroupInvitation
 
-		err = rows.Scan(&inv.ID, &inv.GroupID, &inv.SenderID, &inv.ReceiverID, &inv.CreatedAt)
+		err = rows.Scan(
+			&inv.ID,
+			&inv.GroupID,
+			&inv.SenderID,
+			&inv.ReceiverID,
+			&inv.CreatedAt,
+		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to deserialize incoming group invitation record into model structure: %w", err)
 		}
@@ -248,7 +265,13 @@ func (s *Store) ListOutgoingGroupInvitations(senderID string) ([]models.GroupInv
 	for rows.Next() {
 		var inv models.GroupInvitation
 
-		err = rows.Scan(&inv.ID, &inv.GroupID, &inv.SenderID, &inv.ReceiverID, &inv.CreatedAt)
+		err = rows.Scan(
+			&inv.ID,
+			&inv.GroupID,
+			&inv.SenderID,
+			&inv.ReceiverID,
+			&inv.CreatedAt,
+		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to deserialize outgoing group invitation record into model structure: %w", err)
 		}
