@@ -46,7 +46,47 @@ func (s *Store) GetSpendingTotals(userID string, since time.Time) (*models.Spend
 // ListPaymentsByUser aggregates a unified, chronologically ordered transaction feed
 // containing both inbound and outbound payments for use in an activity feed view.
 func (s *Store) ListPaymentsByUser(userID string) ([]models.Payment, error) {
-	return nil, nil
+	query := `
+    SELECT id, sender_id, receiver_id, amount, total_amount, note, payment_type, total_installments, status, created_at
+    FROM payments
+    WHERE sender_id = ? OR receiver_id = ?
+    ORDER BY created_at DESC;`
+
+	rows, err := s.db.Query(query, userID, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to compile transaction history ledger for user '%s': %w", userID, err)
+	}
+	defer rows.Close()
+
+	payments := []models.Payment{}
+
+	for rows.Next() {
+		var p models.Payment
+
+		err = rows.Scan(
+			&p.ID,
+			&p.SenderID,
+			&p.ReceiverID,
+			&p.Amount,
+			&p.TotalAmount,
+			&p.Note,
+			&p.PaymentType,
+			&p.TotalInstallments,
+			&p.Status,
+			&p.CreatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan ledger row segment into payment struct: %w", err)
+		}
+
+		payments = append(payments, p)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("detected stream cursor failure during transaction history compilation for user '%s': %w", userID, err)
+	}
+
+	return payments, nil
 }
 
 // ListPaymentsBetweenUsers retrieves the isolated transaction stream shared exclusively
