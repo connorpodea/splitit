@@ -60,6 +60,16 @@ func (s *Store) Withdraw(userID string, amount float64) error {
 // CreateLinkedCard records an external card instrument against a user account using a tokenized
 // provider reference string. Raw card numbers must never be passed or stored here.
 func (s *Store) CreateLinkedCard(card *models.LinkedCard) error {
+	query := `
+	INSERT INTO linked_cards (id, user_id, token_ref, last4, brand, is_default)
+	VALUES (?, ?, ?, ?, ?, 0);`
+
+	card.ID = create_new_ID()
+
+	_, err := s.db.Exec(query, card.ID, card.UserID, card.TokenRef, card.Last4, card.Brand)
+	if err != nil {
+		return fmt.Errorf("failed to register linked card for user ID '%s': %w", card.UserID, err)
+	}
 	return nil
 }
 

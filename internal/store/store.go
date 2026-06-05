@@ -231,5 +231,23 @@ func (s *Store) createTables() error {
 	if err != nil {
 		return err
 	}
+
+	query = `
+	CREATE TABLE IF NOT EXISTS linked_cards (
+		id TEXT PRIMARY KEY,
+		user_id TEXT NOT NULL,
+		token_ref TEXT NOT NULL,
+		last4 TEXT NOT NULL,
+		brand TEXT NOT NULL,
+		is_default INTEGER NOT NULL DEFAULT 0,
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+	);`
+
+	_, err = s.db.Exec(query)
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
