@@ -171,9 +171,9 @@ type LinkedCard struct {
 	CreatedAt string `json:"created_at"`
 }
 
-// WalletTx records an absolute balance mutation event (deposit or withdrawal) on a user account.
+// WalletTransaction records an absolute balance mutation event (deposit or withdrawal) on a user account.
 // Distinct from peer-to-peer Payment records in the payments ledger.
-type WalletTx struct {
+type WalletTransaction struct {
 	ID        string  `json:"id"`
 	UserID    string  `json:"user_id"`
 	Type      string  `json:"type"` // "deposit" | "withdrawal"

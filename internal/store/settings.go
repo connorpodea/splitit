@@ -8,67 +8,62 @@ import (
 	"github.com/connorpodea/splitit/internal/models"
 )
 
-// Deposit credits the specified amount to a user's available cash balance.
-func (s *Store) Deposit(userID string, amount float64) error {
+// GetUserSettings pulls preference and privacy configuration metadata from the user_settings table.
+func (s *Store) GetUserSettings(userID string) (*models.UserSettings, error) {
 	query := `
-	UPDATE users
-	SET balance = balance + ?
-	WHERE id = ?;`
+    SELECT user_id, theme, email_notifications, is_discoverable, updated_at
+    FROM user_settings
+    WHERE user_id = ?;`
 
-	transaction, err := s.db.Begin()
+	var settings models.UserSettings
+	var emailNotifsInt int
+	var isDiscoverableInt int
+
+	err := s.db.QueryRow(query, userID).Scan(
+		&settings.UserID,
+		&settings.Theme,
+		&emailNotifsInt,
+		&isDiscoverableInt,
+		&settings.UpdatedAt,
+	)
 	if err != nil {
-		return fmt.Errorf("failed to open transaction session context for deposit: %w", err)
-	}
-	defer transaction.Rollback()
-
-	result, err := transaction.Exec(query, amount, userID)
-	if err != nil {
-		return fmt.Errorf("failed to clear balance deposit allocation of $%.2f for user ID '%s': %w", amount, userID, err)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("user configuration matrix not found for user ID '%s': %w", userID, err)
+		}
+		return nil, fmt.Errorf("failed to extract layout context metrics for user ID '%s': %w", userID, err)
 	}
 
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("failed to read deposit execution state metrics: %w", err)
-	}
-	if rowsAffected == 0 {
-		return fmt.Errorf("deposit rejected: user account ID '%s' not found in user registry", userID)
-	}
+	settings.EmailNotifications = emailNotifsInt == 1
+	settings.IsDiscoverable = isDiscoverableInt == 1
 
-	if err = transaction.Commit(); err != nil {
-		return fmt.Errorf("critical ledger engine mismatch: failed to write deposit modifications to disk on final commit sequence: %w", err)
-	}
-
-	return nil
+	return &settings, nil
 }
 
-// Withdraw debits the specified amount from a user's cash balance after liquid funds verification.
-func (s *Store) Withdraw(userID string, amount float64) error {
+// UpsertUserSettings inserts or updates the preference and privacy configuration for a user
+// in a single conflict-safe operation.
+func (s *Store) UpsertUserSettings(settings *models.UserSettings) error {
 	query := `
-	UPDATE users
-	SET balance = balance - ?
-	WHERE id = ?;`
+	INSERT INTO user_settings (user_id, theme, email_notifications, is_discoverable, updated_at)
+	VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+	ON CONFLICT (user_id) DO UPDATE SET
+		theme = excluded.theme,
+		email_notifications = excluded.email_notifications,
+		is_discoverable = excluded.is_discoverable,
+		updated_at = CURRENT_TIMESTAMP;`
 
-	transaction, err := s.db.Begin()
+	emailNotifsInt := 0
+	if settings.EmailNotifications {
+		emailNotifsInt = 1
+	}
+
+	isDiscoverableInt := 0
+	if settings.IsDiscoverable {
+		isDiscoverableInt = 1
+	}
+
+	_, err := s.db.Exec(query, settings.UserID, settings.Theme, emailNotifsInt, isDiscoverableInt)
 	if err != nil {
-		return fmt.Errorf("failed to open transaction session context for withdrawal: %w", err)
-	}
-	defer transaction.Rollback()
-
-	result, err := transaction.Exec(query, amount, userID)
-	if err != nil {
-		return fmt.Errorf("failed to clear balance withdraw allocation of $%.2f for user ID '%s': %w", amount, userID, err)
-	}
-
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("failed to read withdrawal execution state metrics: %w", err)
-	}
-	if rowsAffected == 0 {
-		return fmt.Errorf("withdrawal rejected: user account ID '%s' not found in user registry", userID)
-	}
-
-	if err = transaction.Commit(); err != nil {
-		return fmt.Errorf("critical ledger engine mismatch: failed to write withdraw modifications to disk on final commit sequence: %w", err)
+		return fmt.Errorf("failed to save or overwrite layout configuration matrix for user ID '%s': %w", settings.UserID, err)
 	}
 
 	return nil
@@ -215,67 +210,6 @@ func (s *Store) SetDefaultCard(cardID, userID string) error {
 	}
 	if rowsAffected == 0 {
 		return fmt.Errorf("default assignment rejected: card ID '%s' not found or unauthorized for user '%s'", cardID, userID)
-	}
-
-	return nil
-}
-
-// GetUserSettings pulls preference and privacy configuration metadata from the user_settings table.
-func (s *Store) GetUserSettings(userID string) (*models.UserSettings, error) {
-	query := `
-    SELECT user_id, theme, email_notifications, is_discoverable, updated_at
-    FROM user_settings
-    WHERE user_id = ?;`
-
-	var settings models.UserSettings
-	var emailNotifsInt int
-	var isDiscoverableInt int
-
-	err := s.db.QueryRow(query, userID).Scan(
-		&settings.UserID,
-		&settings.Theme,
-		&emailNotifsInt,
-		&isDiscoverableInt,
-		&settings.UpdatedAt,
-	)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, fmt.Errorf("user configuration matrix not found for user ID '%s': %w", userID, err)
-		}
-		return nil, fmt.Errorf("failed to extract layout context metrics for user ID '%s': %w", userID, err)
-	}
-
-	settings.EmailNotifications = emailNotifsInt == 1
-	settings.IsDiscoverable = isDiscoverableInt == 1
-
-	return &settings, nil
-}
-
-// UpsertUserSettings inserts or updates the preference and privacy configuration for a user
-// in a single conflict-safe operation.
-func (s *Store) UpsertUserSettings(settings *models.UserSettings) error {
-	query := `
-	INSERT INTO user_settings (user_id, theme, email_notifications, is_discoverable, updated_at)
-	VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-	ON CONFLICT (user_id) DO UPDATE SET
-		theme = excluded.theme,
-		email_notifications = excluded.email_notifications,
-		is_discoverable = excluded.is_discoverable,
-		updated_at = CURRENT_TIMESTAMP;`
-
-	emailNotifsInt := 0
-	if settings.EmailNotifications {
-		emailNotifsInt = 1
-	}
-
-	isDiscoverableInt := 0
-	if settings.IsDiscoverable {
-		isDiscoverableInt = 1
-	}
-
-	_, err := s.db.Exec(query, settings.UserID, settings.Theme, emailNotifsInt, isDiscoverableInt)
-	if err != nil {
-		return fmt.Errorf("failed to save or overwrite layout configuration matrix for user ID '%s': %w", settings.UserID, err)
 	}
 
 	return nil

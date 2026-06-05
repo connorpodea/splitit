@@ -135,9 +135,76 @@ func (s *Store) ListPaymentsBetweenUsers(userID, otherID string) ([]models.Payme
 	return payments, nil
 }
 
+// Deposit credits the specified amount to a user's available cash balance.
+func (s *Store) Deposit(userID string, amount float64) error {
+	query := `
+	UPDATE users
+	SET balance = balance + ?
+	WHERE id = ?;`
+
+	transaction, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to open transaction session context for deposit: %w", err)
+	}
+	defer transaction.Rollback()
+
+	result, err := transaction.Exec(query, amount, userID)
+	if err != nil {
+		return fmt.Errorf("failed to clear balance deposit allocation of $%.2f for user ID '%s': %w", amount, userID, err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to read deposit execution state metrics: %w", err)
+	}
+	if rowsAffected == 0 {
+		return fmt.Errorf("deposit rejected: user account ID '%s' not found in user registry", userID)
+	}
+
+	if err = transaction.Commit(); err != nil {
+		return fmt.Errorf("critical ledger engine mismatch: failed to write deposit modifications to disk on final commit sequence: %w", err)
+	}
+
+	return nil
+}
+
+// Withdraw debits the specified amount from a user's cash balance after liquid funds verification.
+func (s *Store) Withdraw(userID string, amount float64) error {
+	query := `
+	UPDATE users
+	SET balance = balance - ?
+	WHERE id = ?;`
+
+	transaction, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to open transaction session context for withdrawal: %w", err)
+	}
+	defer transaction.Rollback()
+
+	result, err := transaction.Exec(query, amount, userID)
+	if err != nil {
+		return fmt.Errorf("failed to clear balance withdraw allocation of $%.2f for user ID '%s': %w", amount, userID, err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to read withdrawal execution state metrics: %w", err)
+	}
+	if rowsAffected == 0 {
+		return fmt.Errorf("withdrawal rejected: user account ID '%s' not found in user registry", userID)
+	}
+
+	if err = transaction.Commit(); err != nil {
+		return fmt.Errorf("critical ledger engine mismatch: failed to write withdraw modifications to disk on final commit sequence: %w", err)
+	}
+
+	return nil
+}
+
 // ListWalletTransactions retrieves the absolute balance mutation history (deposits and withdrawals)
 // for a user, separate from the peer-to-peer payments ledger.
-func (s *Store) ListWalletTransactions(userID string) ([]models.WalletTx, error) {
+func (s *Store) ListWalletTransactions(userID string) ([]models.WalletTransaction, error) {
+
 	return nil, nil
 }
 
