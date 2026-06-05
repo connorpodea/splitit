@@ -253,5 +253,20 @@ func (s *Store) createTables() error {
 		return err
 	}
 
+	query = `
+		CREATE TABLE IF NOT EXISTS wallet_transactions (
+    	id TEXT PRIMARY KEY,
+    	user_id TEXT NOT NULL,
+    	amount_cents INTEGER NOT NULL,
+    	transaction_type TEXT CHECK(transaction_type IN ('deposit', 'withdrawal')) NOT NULL,
+    	created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    	FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+	);`
+
+	_, err = s.db.Exec(query)
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
