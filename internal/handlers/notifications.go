@@ -25,6 +25,25 @@ func (h *Handler) ListNotifications(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, notifs)
 }
 
+// CountUnseenNotifications returns the integer count of unseen notifications for the
+// authenticated user, intended for driving badge indicators in the UI.
+func (h *Handler) CountUnseenNotifications(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only GET requests are permitted on this route"})
+		return
+	}
+	userID, authorized := h.authenticateSession(w, r)
+	if !authorized {
+		return
+	}
+	count, err := h.store.CountUnseenNotifications(userID)
+	if err != nil {
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	WriteJSON(w, http.StatusOK, map[string]int{"unseen_count": count})
+}
+
 // MarkNotificationSeen marks a single notification as seen for the authenticated user.
 func (h *Handler) MarkNotificationSeen(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {

@@ -2,13 +2,6 @@ package handlers
 
 import "net/http"
 
-// Deposit credits a specified amount to the authenticated user's cash balance.
-func (h *Handler) Deposit(w http.ResponseWriter, r *http.Request) {}
-
-// Withdraw debits a specified amount from the authenticated user's cash balance
-// after liquid funds verification.
-func (h *Handler) Withdraw(w http.ResponseWriter, r *http.Request) {}
-
 // CreateLinkedCard registers a new external funding card instrument to the
 // authenticated user's account using a tokenized provider reference.
 func (h *Handler) CreateLinkedCard(w http.ResponseWriter, r *http.Request) {}

@@ -591,3 +591,29 @@ func (s *Store) ApplyMonthlyOverduePenalties() error {
 
 	return nil
 }
+
+// GetInstallmentSummary pulls combined installment portfolio metrics — total settled,
+// total outstanding, and total overdue amounts — in a single query execution.
+func (s *Store) GetInstallmentSummary(userID string) (*models.InstallmentSummary, error) {
+	today := time.Now().Format("2006-01-02")
+
+	query := `
+	SELECT
+		COALESCE(SUM(CASE WHEN is_paid = 1 THEN amount_cents ELSE 0 END), 0) AS total_settled_cents,
+		COALESCE(SUM(CASE WHEN is_paid = 0 AND due_date >= ? THEN amount_cents ELSE 0 END), 0) AS total_outstanding_cents,
+		COALESCE(SUM(CASE WHEN is_paid = 0 AND due_date < ? THEN amount_cents ELSE 0 END), 0) AS total_overdue_cents
+	FROM installments
+	WHERE user_id = ?;`
+
+	var summary models.InstallmentSummary
+	err := s.db.QueryRow(query, today, today, userID).Scan(
+		&summary.TotalSettledCents,
+		&summary.TotalOutstandingCents,
+		&summary.TotalOverdueCents,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to aggregate installment portfolio metrics for user '%s': %w", userID, err)
+	}
+
+	return &summary, nil
+}

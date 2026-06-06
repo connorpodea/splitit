@@ -219,6 +219,98 @@ func (s *Store) ListPaymentsSent(userID string) ([]models.Payment, error) {
 	return payments, nil
 }
 
+// ListPaymentsByUser aggregates a unified, chronologically ordered transaction feed
+// containing both inbound and outbound payments for use in an activity feed view.
+func (s *Store) ListPaymentsByUser(userID string) ([]models.Payment, error) {
+	query := `
+    SELECT id, sender_id, receiver_id, amount_cents, total_amount_cents, note, payment_type, total_installments, status, created_at
+    FROM payments
+    WHERE sender_id = ? OR receiver_id = ?
+    ORDER BY created_at DESC;`
+
+	rows, err := s.db.Query(query, userID, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to compile transaction history ledger for user '%s': %w", userID, err)
+	}
+	defer rows.Close()
+
+	payments := []models.Payment{}
+
+	for rows.Next() {
+		var p models.Payment
+
+		err = rows.Scan(
+			&p.ID,
+			&p.SenderID,
+			&p.ReceiverID,
+			&p.AmountCents,
+			&p.TotalAmountCents,
+			&p.Note,
+			&p.PaymentType,
+			&p.TotalInstallments,
+			&p.Status,
+			&p.CreatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan ledger row segment into payment struct: %w", err)
+		}
+
+		payments = append(payments, p)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("detected stream cursor failure during transaction history compilation for user '%s': %w", userID, err)
+	}
+
+	return payments, nil
+}
+
+// ListPaymentsBetweenUsers retrieves the isolated transaction stream shared exclusively
+// between two specific user identities.
+func (s *Store) ListPaymentsBetweenUsers(userID, otherID string) ([]models.Payment, error) {
+	query := `
+    SELECT id, sender_id, receiver_id, amount_cents, total_amount_cents, note, payment_type, total_installments, status, created_at
+    FROM payments
+    WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)
+    ORDER BY created_at DESC;` // Explicit grouping guarantees safety if filters are added later
+
+	rows, err := s.db.Query(query, userID, otherID, otherID, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract isolated transaction ledger between '%s' and '%s': %w", userID, otherID, err)
+	}
+	defer rows.Close()
+
+	payments := []models.Payment{}
+
+	for rows.Next() {
+		var p models.Payment
+
+		err = rows.Scan(
+			&p.ID,
+			&p.SenderID,
+			&p.ReceiverID,
+			&p.AmountCents,
+			&p.TotalAmountCents,
+			&p.Note,
+			&p.PaymentType,
+			&p.TotalInstallments,
+			&p.Status,
+			&p.CreatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan ledger row segment into payment struct: %w", err)
+		}
+
+		payments = append(payments, p)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("detected stream cursor failure during shared history compilation for context pair ('%s', '%s'): %w", userID, otherID, err)
+	}
+
+	return payments, nil
+}
+
 // CreatePaymentRequest inserts a pending payment request record and notifies the payer.
 func (s *Store) CreatePaymentRequest(request *models.PaymentRequest) error {
 	// Generate a unique request identifier inside the store so the client never controls primary keys

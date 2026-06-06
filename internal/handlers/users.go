@@ -263,6 +263,39 @@ func (h *Handler) GetProfile(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, profile)
 }
 
+// SearchProfiles performs a fuzzy search over public user profiles by name or ID,
+// returning all matching active accounts for the authenticated caller.
+func (h *Handler) SearchProfiles(w http.ResponseWriter, r *http.Request) {
+	// Ensure that this endpoint only accepts GET requests
+	if r.Method != http.MethodGet {
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only GET requests are permitted to this route"})
+		return
+	}
+
+	// Confirm user active session validity state before executing search queries
+	_, authorized := h.authenticateSession(w, r)
+	if !authorized {
+		return
+	}
+
+	// Extract the search term from the URL query parameters
+	queryStr := r.URL.Query().Get("q")
+	if queryStr == "" {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Missing required URL query parameter: 'q'"})
+		return
+	}
+
+	// Pass the search term down to the database engine
+	profiles, err := h.store.SearchProfiles(queryStr)
+	if err != nil {
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	// Package the returned data into JSON and ship it over the wire
+	WriteJSON(w, http.StatusOK, profiles)
+}
+
 // GetRegistrationView serves the registration screen HTML.
 func (h *Handler) GetRegistrationView(w http.ResponseWriter, r *http.Request) {
 	writeHTML(w, registerHTML())
@@ -391,7 +424,7 @@ func registerHTML() string {
             var pw  = document.getElementById('reg-pw').value;
             var cpw = document.getElementById('reg-cpw').value;
             if (pw.length < 8)  { event.preventDefault(); showErr('Password must be at least 8 characters.'); return; }
-            if (pw !== cpw)     { event.preventDefault(); showErr('Passwords don’t match — please try again.'); return; }
+            if (pw !== cpw)     { event.preventDefault(); showErr('Passwords don't match — please try again.'); return; }
           "
           hx-on::response-error="
             const d = JSON.parse(event.detail.xhr.responseText);

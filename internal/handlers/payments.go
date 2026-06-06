@@ -79,6 +79,115 @@ func (h *Handler) GetPayment(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, payment)
 }
 
+// ListPaymentsReceived returns all inbound payment records for the authenticated user, ordered newest first.
+func (h *Handler) ListPaymentsReceived(w http.ResponseWriter, r *http.Request) {
+	// Ensure that this endpoint only accepts GET requests
+	if r.Method != http.MethodGet {
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only GET requests are permitted to this route"})
+		return
+	}
+
+	// Validate target context parameters natively through current session validation
+	userID, authorized := h.authenticateSession(w, r)
+	if !authorized {
+		return
+	}
+
+	// Query the database engine for all payments received by this user
+	payments, err := h.store.ListPaymentsReceived(userID)
+	if err != nil {
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	// Package the returned data into JSON and ship it over the wire
+	WriteJSON(w, http.StatusOK, payments)
+}
+
+// ListPaymentsSent returns all outbound payment records for the authenticated user, ordered newest first.
+func (h *Handler) ListPaymentsSent(w http.ResponseWriter, r *http.Request) {
+	// Ensure that this endpoint only accepts GET requests
+	if r.Method != http.MethodGet {
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only GET requests are permitted to this route"})
+		return
+	}
+
+	// Validate target context parameters natively through current session validation
+	userID, authorized := h.authenticateSession(w, r)
+	if !authorized {
+		return
+	}
+
+	// Query the database engine for all payments sent by this user
+	payments, err := h.store.ListPaymentsSent(userID)
+	if err != nil {
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	// Package the returned data into JSON and ship it over the wire
+	WriteJSON(w, http.StatusOK, payments)
+}
+
+// ListPaymentsByUser returns a unified, chronologically sorted transaction feed containing
+// both inbound and outbound payments for the authenticated user.
+func (h *Handler) ListPaymentsByUser(w http.ResponseWriter, r *http.Request) {
+	// Ensure that this endpoint only accepts GET requests
+	if r.Method != http.MethodGet {
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only GET requests are permitted to this route"})
+		return
+	}
+
+	// Validate target context parameters natively through current session validation
+	userID, authorized := h.authenticateSession(w, r)
+	if !authorized {
+		return
+	}
+
+	// Query the database engine for this user's full transaction history
+	payments, err := h.store.ListPaymentsByUser(userID)
+	if err != nil {
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	// Package the returned data into JSON and ship it over the wire
+	WriteJSON(w, http.StatusOK, payments)
+}
+
+// ListPaymentsBetweenUsers returns the isolated payment stream shared between the authenticated
+// user and a specified peer, identified by the other_id URL query parameter.
+func (h *Handler) ListPaymentsBetweenUsers(w http.ResponseWriter, r *http.Request) {
+	// Ensure that this endpoint only accepts GET requests
+	if r.Method != http.MethodGet {
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only GET requests are permitted to this route"})
+		return
+	}
+
+	// Validate target context parameters natively through current session validation
+	userID, authorized := h.authenticateSession(w, r)
+	if !authorized {
+		return
+	}
+
+	// Extract the peer identity from the URL query parameters
+	otherID := r.URL.Query().Get("other_id")
+	if otherID == "" {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Missing required URL query parameter: 'other_id'"})
+		return
+	}
+
+	// Query the database engine for the bilateral transaction stream between both user identities
+	payments, err := h.store.ListPaymentsBetweenUsers(userID, otherID)
+	if err != nil {
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	// Package the returned data into JSON and ship it over the wire
+	WriteJSON(w, http.StatusOK, payments)
+}
+
 // CreatePaymentRequest creates a new pending payment request, binding the requester identity
 // from the session cookie to prevent spoofing.
 func (h *Handler) CreatePaymentRequest(w http.ResponseWriter, r *http.Request) {
