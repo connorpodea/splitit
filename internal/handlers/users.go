@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/connorpodea/splitit/internal/models"
 	"golang.org/x/crypto/bcrypt"
@@ -65,7 +66,7 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	// Pass the populated struct down to the database engine
 	err = h.store.CreateUser(&new_user)
 	if err != nil {
-		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": friendlyError(err)})
 		return
 	}
 
@@ -169,7 +170,7 @@ func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
 	// Query the database engine for this user using our secure identity
 	user, err := h.store.GetUser(userID)
 	if err != nil {
-		WriteJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		WriteJSON(w, http.StatusNotFound, map[string]string{"error": friendlyError(err)})
 		return
 	}
 	if !user.IsActive {
@@ -198,7 +199,7 @@ func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
 	// Query the database engine for all users
 	users, err := h.store.ListUsers()
 	if err != nil {
-		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": friendlyError(err)})
 		return
 	}
 
@@ -223,7 +224,7 @@ func (h *Handler) ListProfiles(w http.ResponseWriter, r *http.Request) {
 	// Query the database engine for all profiles
 	profiles, err := h.store.ListProfiles()
 	if err != nil {
-		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": friendlyError(err)})
 		return
 	}
 
@@ -255,7 +256,7 @@ func (h *Handler) GetProfile(w http.ResponseWriter, r *http.Request) {
 	// Query the database engine for this profile
 	profile, err := h.store.GetProfile(userID)
 	if err != nil {
-		WriteJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		WriteJSON(w, http.StatusNotFound, map[string]string{"error": friendlyError(err)})
 		return
 	}
 
@@ -288,7 +289,7 @@ func (h *Handler) SearchProfiles(w http.ResponseWriter, r *http.Request) {
 	// Pass the search term down to the database engine
 	profiles, err := h.store.SearchProfiles(queryStr)
 	if err != nil {
-		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": friendlyError(err)})
 		return
 	}
 
@@ -424,7 +425,7 @@ func registerHTML() string {
             var pw  = document.getElementById('reg-pw').value;
             var cpw = document.getElementById('reg-cpw').value;
             if (pw.length < 8)  { event.preventDefault(); showErr('Password must be at least 8 characters.'); return; }
-            if (pw !== cpw)     { event.preventDefault(); showErr('Passwords don't match — please try again.'); return; }
+            if (pw !== cpw)     { event.preventDefault(); showErr('Passwords don’t match — please try again.'); return; }
           "
           hx-on::response-error="
             const d = JSON.parse(event.detail.xhr.responseText);
@@ -475,7 +476,7 @@ func registerHTML() string {
 
 // viewProfile renders the profile section HTML, displaying the user's Splitit Score, credit limit,
 // balance stats, and navigation menu.
-func viewProfile(user *models.User, avatar, name, handle, email, phone string, friends []models.Profile, installments []models.Installment) string {
+func viewProfile(user *models.User, avatar, name, handle, email, phone string, friends []models.Profile, installments []models.Installment, groups []models.Group) string {
 	score := user.CreditScore
 	scoreLabel := creditScoreLabel(score)
 	scoreWidth := fmt.Sprintf("%d%%", score)
@@ -495,14 +496,34 @@ func viewProfile(user *models.User, avatar, name, handle, email, phone string, f
 
 	balanceWhole := user.BalanceCents / 100
 
+	createdAtFormatted := ""
+	if user.CreatedAt != "" {
+		formats := []string{"2006-01-02 15:04:05", "2006-01-02T15:04:05Z", "2006-01-02T15:04:05-07:00", "2006-01-02"}
+		for _, f := range formats {
+			if t, err := time.Parse(f, user.CreatedAt); err == nil {
+				createdAtFormatted = t.Format("01-02-2006")
+				break
+			}
+		}
+		if createdAtFormatted == "" && len(user.CreatedAt) >= 10 {
+			createdAtFormatted = user.CreatedAt[5:7] + "-" + user.CreatedAt[8:10] + "-" + user.CreatedAt[:4]
+		}
+	}
+
+	avatarColor := user.ProfileColor
+	if avatarColor == "" {
+		avatarColor = "av-indigo"
+	}
+
 	return `
 <section class="view" data-view="profile">
   <div class="profile-hero">
-    <div class="avatar-xl">` + avatar + `</div>
+    <div class="avatar-xl ` + avatarColor + `">` + avatar + `</div>
     <div class="profile-name">` + name + `</div>
     <div class="profile-handle">@` + handle + `</div>
     <div class="profile-email">` + email + `</div>
     <div class="profile-phone_number">` + phone + `</div>
+    <div class="profile-phone_number">` + createdAtFormatted + `</div>
   </div>
 
   <div class="score-card">
@@ -525,10 +546,11 @@ func viewProfile(user *models.User, avatar, name, handle, email, phone string, f
     </div>
   </div>
 
-  <div class="stat-grid">
+  <div class="stat-grid" style="grid-template-columns:repeat(2,1fr);">
     <div class="stat-tile"><div class="stat-lbl">Balance</div><div class="stat-val green mono">$` + fmt.Sprintf("%d", balanceWhole) + `</div></div>
+	<div class="stat-tile"><div class="stat-lbl">Splits</div><div class="stat-val indigo mono">` + fmt.Sprintf("%d", len(activeSplits)) + `</div></div>
     <div class="stat-tile"><div class="stat-lbl">Friends</div><div class="stat-val mono">` + fmt.Sprintf("%d", len(friends)) + `</div></div>
-    <div class="stat-tile"><div class="stat-lbl">Splits</div><div class="stat-val indigo mono">` + fmt.Sprintf("%d", len(activeSplits)) + `</div></div>
+    <div class="stat-tile"><div class="stat-lbl">Groups</div><div class="stat-val mono">` + fmt.Sprintf("%d", len(groups)) + `</div></div>
   </div>
 
   <div class="menu-list">
@@ -557,6 +579,7 @@ func viewProfile(user *models.User, avatar, name, handle, email, phone string, f
 }
 
 // initials extracts a 1-2 character uppercase abbreviation from a full name for use in avatar elements.
+// Single-name users get exactly one letter; two-or-more-word names get first+last initials.
 func initials(fullName string) string {
 	clean := strings.TrimSpace(fullName)
 	if clean == "" {
@@ -565,9 +588,6 @@ func initials(fullName string) string {
 	parts := strings.Fields(clean)
 	if len(parts) == 1 {
 		runes := []rune(parts[0])
-		if len(runes) >= 2 {
-			return strings.ToUpper(string(runes[0])) + strings.ToUpper(string(runes[1]))
-		}
 		return strings.ToUpper(string(runes[0]))
 	}
 	first := []rune(parts[0])
@@ -605,22 +625,190 @@ func creditScoreLabel(score uint8) string {
 	}
 }
 
-// UpdatePassword processes a credential rotation request, hashing the incoming
-// plaintext password before delegating the digest to the store layer.
-func (h *Handler) UpdatePassword(w http.ResponseWriter, r *http.Request) {}
+// UpdatePassword processes a credential rotation request, verifying the current password,
+// hashing the new one, and delegating the updated digest to the store layer.
+func (h *Handler) UpdatePassword(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only POST requests are permitted on this route"})
+		return
+	}
+	userID, authorized := h.authenticateSession(w, r)
+	if !authorized {
+		return
+	}
+
+	type Input struct {
+		CurrentPassword string `json:"current_password"`
+		NewPassword     string `json:"new_password"`
+	}
+	var input Input
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil || input.CurrentPassword == "" || input.NewPassword == "" {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Missing current_password or new_password"})
+		return
+	}
+	if len(input.NewPassword) < 8 {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "New password must be at least 8 characters"})
+		return
+	}
+
+	user, err := h.store.GetUser(userID)
+	if err != nil {
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": friendlyError(err)})
+		return
+	}
+	if err = bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(input.CurrentPassword)); err != nil {
+		WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "Current password is incorrect"})
+		return
+	}
+
+	newHash, err := bcrypt.GenerateFromPassword([]byte(input.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to hash new password securely"})
+		return
+	}
+	if err = h.store.UpdatePassword(userID, string(newHash)); err != nil {
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": friendlyError(err)})
+		return
+	}
+
+	WriteJSON(w, http.StatusOK, map[string]bool{"success": true})
+}
 
 // UpdateEmail processes a request to update the authenticated user's email address on record.
-func (h *Handler) UpdateEmail(w http.ResponseWriter, r *http.Request) {}
+func (h *Handler) UpdateEmail(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only POST requests are permitted on this route"})
+		return
+	}
+	userID, authorized := h.authenticateSession(w, r)
+	if !authorized {
+		return
+	}
+
+	type Input struct {
+		Value string `json:"value"`
+	}
+	var input Input
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil || input.Value == "" {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Missing required field: value"})
+		return
+	}
+	if err := h.store.UpdateEmail(userID, input.Value); err != nil {
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": friendlyError(err)})
+		return
+	}
+
+	WriteJSON(w, http.StatusOK, map[string]bool{"success": true})
+}
 
 // UpdatePhoneNumber processes a request to update the authenticated user's phone number on record.
-func (h *Handler) UpdatePhoneNumber(w http.ResponseWriter, r *http.Request) {}
+func (h *Handler) UpdatePhoneNumber(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only POST requests are permitted on this route"})
+		return
+	}
+	userID, authorized := h.authenticateSession(w, r)
+	if !authorized {
+		return
+	}
+
+	type Input struct {
+		Value string `json:"value"`
+	}
+	var input Input
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil || input.Value == "" {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Missing required field: value"})
+		return
+	}
+	if err := h.store.UpdatePhoneNumber(userID, input.Value); err != nil {
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": friendlyError(err)})
+		return
+	}
+
+	WriteJSON(w, http.StatusOK, map[string]bool{"success": true})
+}
 
 // UpdateDisplayName processes a request to update the authenticated user's display name.
-func (h *Handler) UpdateDisplayName(w http.ResponseWriter, r *http.Request) {}
+func (h *Handler) UpdateDisplayName(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only POST requests are permitted on this route"})
+		return
+	}
+	userID, authorized := h.authenticateSession(w, r)
+	if !authorized {
+		return
+	}
 
-// DeactivateAccount processes a soft-delete deactivation request, transitioning the
-// account to an inactive state without purging underlying ledger records.
-func (h *Handler) DeactivateAccount(w http.ResponseWriter, r *http.Request) {}
+	type Input struct {
+		Value string `json:"value"`
+	}
+	var input Input
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil || strings.TrimSpace(input.Value) == "" {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Missing required field: value"})
+		return
+	}
+	if err := h.store.UpdateDisplayName(userID, strings.TrimSpace(input.Value)); err != nil {
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": friendlyError(err)})
+		return
+	}
+
+	WriteJSON(w, http.StatusOK, map[string]bool{"success": true})
+}
+
+// UpdateProfileColor persists the user's chosen avatar colour class.
+func (h *Handler) UpdateProfileColor(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only POST requests are permitted on this route"})
+		return
+	}
+	userID, authorized := h.authenticateSession(w, r)
+	if !authorized {
+		return
+	}
+	type Input struct {
+		Color string `json:"color"`
+	}
+	var input Input
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil || strings.TrimSpace(input.Color) == "" {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Missing required field: color"})
+		return
+	}
+	if err := h.store.UpdateProfileColor(userID, input.Color); err != nil {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": friendlyError(err)})
+		return
+	}
+	WriteJSON(w, http.StatusOK, map[string]bool{"success": true})
+}
+
+// DeactivateAccount processes a soft-delete deactivation request, transitions the account
+// to an inactive state, and immediately expires the session cookie.
+func (h *Handler) DeactivateAccount(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only POST requests are permitted on this route"})
+		return
+	}
+	userID, authorized := h.authenticateSession(w, r)
+	if !authorized {
+		return
+	}
+
+	if err := h.store.DeactivateAccount(userID); err != nil {
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": friendlyError(err)})
+		return
+	}
+
+	// Immediately expire the session cookie so the browser is forced back to login
+	http.SetCookie(w, &http.Cookie{
+		Name:     "session_user_id",
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
+
+	WriteJSON(w, http.StatusOK, map[string]bool{"success": true})
+}
 
 // avatarClass returns a CSS colour class for an avatar element by cycling through a fixed palette.
 func avatarClass(i int) string {

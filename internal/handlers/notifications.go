@@ -19,7 +19,7 @@ func (h *Handler) ListNotifications(w http.ResponseWriter, r *http.Request) {
 	}
 	notifs, err := h.store.ListNotifications(userID)
 	if err != nil {
-		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": friendlyError(err)})
 		return
 	}
 	WriteJSON(w, http.StatusOK, notifs)
@@ -38,7 +38,7 @@ func (h *Handler) CountUnseenNotifications(w http.ResponseWriter, r *http.Reques
 	}
 	count, err := h.store.CountUnseenNotifications(userID)
 	if err != nil {
-		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": friendlyError(err)})
 		return
 	}
 	WriteJSON(w, http.StatusOK, map[string]int{"unseen_count": count})
@@ -63,7 +63,7 @@ func (h *Handler) MarkNotificationSeen(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.store.MarkNotificationSeen(input.NotifID, userID); err != nil {
-		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": friendlyError(err)})
 		return
 	}
 	WriteJSON(w, http.StatusOK, map[string]bool{"success": true})
@@ -80,7 +80,7 @@ func (h *Handler) ClearAllNotifications(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if err := h.store.ClearAllNotifications(userID); err != nil {
-		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": friendlyError(err)})
 		return
 	}
 	WriteJSON(w, http.StatusOK, map[string]bool{"success": true})
@@ -94,12 +94,14 @@ func viewNotifications(notifications []models.Notification) string {
 		"friend_accepted":  `<svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><polyline points="16 11 18 13 22 9"/></svg>`,
 		"payment_received": `<svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>`,
 		"payment_request":  `<svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 5v14"/><path d="M5 12h14"/></svg>`,
+		"group_invitation": `<svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`,
 	}
 	typeColor := map[string]string{
 		"friend_request":   "av-indigo",
 		"friend_accepted":  "av-emerald",
 		"payment_received": "av-emerald",
 		"payment_request":  "av-amber",
+		"group_invitation": "av-violet",
 	}
 
 	rows := ""

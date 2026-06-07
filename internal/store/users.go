@@ -27,7 +27,7 @@ func (s *Store) CreateUser(user *models.User) error {
 // Does not filter by is_active so the auth layer can distinguish "not found" from "deactivated".
 func (s *Store) GetUser(userID string) (*models.User, error) {
 	query := `
-	SELECT id, password_hash, name, email, phone_number, balance_cents, credit_score, credit_limit_cents, is_active, created_at
+	SELECT id, password_hash, name, email, phone_number, balance_cents, credit_score, credit_limit_cents, is_active, profile_color, created_at
 	FROM users
 	WHERE id = ?;`
 	var user models.User
@@ -43,6 +43,7 @@ func (s *Store) GetUser(userID string) (*models.User, error) {
 		&user.CreditScore,
 		&user.CreditLimitCents,
 		&isActiveInt,
+		&user.ProfileColor,
 		&user.CreatedAt,
 	)
 	if err != nil {
@@ -60,7 +61,7 @@ func (s *Store) GetUser(userID string) (*models.User, error) {
 // Returns not found if the user is deactivated.
 func (s *Store) GetProfile(id string) (*models.Profile, error) {
 	query := `
-	SELECT id, name, email, phone_number, created_at
+	SELECT id, name, email, phone_number, profile_color, created_at
 	FROM users
 	WHERE id = ? AND is_active = 1;`
 	var profile models.Profile
@@ -70,6 +71,7 @@ func (s *Store) GetProfile(id string) (*models.Profile, error) {
 		&profile.Name,
 		&profile.Email,
 		&profile.PhoneNumber,
+		&profile.ProfileColor,
 		&profile.CreatedAt,
 	)
 	if err != nil {
@@ -85,7 +87,7 @@ func (s *Store) GetProfile(id string) (*models.Profile, error) {
 // ListUsers returns all active user accounts ordered alphabetically by name.
 func (s *Store) ListUsers() ([]models.User, error) {
 	query := `
-	SELECT id, name, email, phone_number, balance_cents, credit_score, credit_limit_cents, is_active, created_at
+	SELECT id, name, email, phone_number, balance_cents, credit_score, credit_limit_cents, is_active, profile_color, created_at
 	FROM users
 	WHERE is_active = 1
 	ORDER BY name ASC;`
@@ -111,6 +113,7 @@ func (s *Store) ListUsers() ([]models.User, error) {
 			&u.CreditScore,
 			&u.CreditLimitCents,
 			&isActiveInt,
+			&u.ProfileColor,
 			&u.CreatedAt,
 		)
 		if err != nil {
@@ -129,7 +132,7 @@ func (s *Store) ListUsers() ([]models.User, error) {
 // ListProfiles returns the public profiles of all active users, ordered alphabetically by name.
 func (s *Store) ListProfiles() ([]models.Profile, error) {
 	query := `
-	SELECT id, name, email, phone_number, created_at
+	SELECT id, name, email, phone_number, profile_color, created_at
 	FROM users
 	WHERE is_active = 1
 	ORDER BY name ASC;`
@@ -150,6 +153,7 @@ func (s *Store) ListProfiles() ([]models.Profile, error) {
 			&profile.Name,
 			&profile.Email,
 			&profile.PhoneNumber,
+			&profile.ProfileColor,
 			&profile.CreatedAt,
 		)
 		if err != nil {
@@ -171,7 +175,7 @@ func (s *Store) SearchProfiles(queryStr string) ([]models.Profile, error) {
 	wildcardQuery := fmt.Sprintf("%%%s%%", queryStr)
 
 	query := `
-	SELECT id, name, email, phone_number, created_at
+	SELECT id, name, email, phone_number, profile_color, created_at
 	FROM users
 	WHERE is_active = 1 AND (name LIKE ? OR email LIKE ?)
 	ORDER BY name ASC;`
@@ -191,6 +195,7 @@ func (s *Store) SearchProfiles(queryStr string) ([]models.Profile, error) {
 			&p.Name,
 			&p.Email,
 			&p.PhoneNumber,
+			&p.ProfileColor,
 			&p.CreatedAt,
 		)
 		if err != nil {
@@ -344,5 +349,21 @@ func (s *Store) UpdateCreditScore(userID string, delta int) error {
 		return fmt.Errorf("credit score adjustment rejected: user account ID '%s' not found in user registry", userID)
 	}
 
+	return nil
+}
+
+// UpdateProfileColor persists a new CSS avatar color class for a user account.
+func (s *Store) UpdateProfileColor(userID, color string) error {
+	result, err := s.db.Exec(`UPDATE users SET profile_color = ? WHERE id = ?;`, color, userID)
+	if err != nil {
+		return fmt.Errorf("failed to update profile color for user '%s': %w", userID, err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to read profile color update metrics: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("profile color update rejected: user ID '%s' not found", userID)
+	}
 	return nil
 }

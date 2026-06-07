@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/connorpodea/splitit/internal/models"
 )
@@ -36,10 +37,13 @@ func (h *Handler) Pay(w http.ResponseWriter, r *http.Request) {
 	// Hard override variable integrity to completely block users from spending out of foreign profiles
 	input.SenderID = sessionID
 
-	// Pass the populated struct down to the database engine
-	err = h.store.Pay(&input)
-	if err != nil {
-		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+	// For direct payments the client sends only amount_cents; TotalAmountCents must equal AmountCents.
+	if input.TotalAmountCents == 0 {
+		input.TotalAmountCents = input.AmountCents
+	}
+
+	if err = h.store.Pay(&input); err != nil {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": friendlyError(err)})
 		return
 	}
 
@@ -71,7 +75,7 @@ func (h *Handler) GetPayment(w http.ResponseWriter, r *http.Request) {
 	// Query the database engine for this payment
 	payment, err := h.store.GetPayment(paymentID)
 	if err != nil {
-		WriteJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		WriteJSON(w, http.StatusNotFound, map[string]string{"error": friendlyError(err)})
 		return
 	}
 
@@ -96,7 +100,7 @@ func (h *Handler) ListPaymentsReceived(w http.ResponseWriter, r *http.Request) {
 	// Query the database engine for all payments received by this user
 	payments, err := h.store.ListPaymentsReceived(userID)
 	if err != nil {
-		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": friendlyError(err)})
 		return
 	}
 
@@ -121,7 +125,7 @@ func (h *Handler) ListPaymentsSent(w http.ResponseWriter, r *http.Request) {
 	// Query the database engine for all payments sent by this user
 	payments, err := h.store.ListPaymentsSent(userID)
 	if err != nil {
-		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": friendlyError(err)})
 		return
 	}
 
@@ -147,7 +151,7 @@ func (h *Handler) ListPaymentsByUser(w http.ResponseWriter, r *http.Request) {
 	// Query the database engine for this user's full transaction history
 	payments, err := h.store.ListPaymentsByUser(userID)
 	if err != nil {
-		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": friendlyError(err)})
 		return
 	}
 
@@ -180,7 +184,7 @@ func (h *Handler) ListPaymentsBetweenUsers(w http.ResponseWriter, r *http.Reques
 	// Query the database engine for the bilateral transaction stream between both user identities
 	payments, err := h.store.ListPaymentsBetweenUsers(userID, otherID)
 	if err != nil {
-		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": friendlyError(err)})
 		return
 	}
 
@@ -216,10 +220,15 @@ func (h *Handler) CreatePaymentRequest(w http.ResponseWriter, r *http.Request) {
 	// Bind requester properties cleanly to block foreign entry identity spoofing attempts
 	input.RequesterID = requesterID
 
-	// Pass the variable down to the database engine
-	err = h.store.CreatePaymentRequest(&input)
+	// Route to RequestFromGroup if the payer ID belongs to a group rather than an individual user.
+	members, _ := h.store.ListGroupMembers(input.PayerID)
+	if len(members) > 0 {
+		err = h.store.RequestFromGroup(&input)
+	} else {
+		err = h.store.CreatePaymentRequest(&input)
+	}
 	if err != nil {
-		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": friendlyError(err)})
 		return
 	}
 
@@ -244,7 +253,7 @@ func (h *Handler) ListIncomingPaymentRequests(w http.ResponseWriter, r *http.Req
 	// Query the database engine for this users incoming payment requests
 	requests, err := h.store.ListIncomingPaymentRequests(userID)
 	if err != nil {
-		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": friendlyError(err)})
 		return
 	}
 
@@ -269,7 +278,7 @@ func (h *Handler) ListOutgoingPaymentRequests(w http.ResponseWriter, r *http.Req
 	// Query the database engine for this users outgoing payment requests
 	requests, err := h.store.ListOutgoingPaymentRequests(userID)
 	if err != nil {
-		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": friendlyError(err)})
 		return
 	}
 
@@ -308,7 +317,7 @@ func (h *Handler) UpdatePaymentRequestStatus(w http.ResponseWriter, r *http.Requ
 	// Pass the variable down to the database engine
 	err = h.store.UpdatePaymentRequestStatus(input.PaymentID, input.NewStatus)
 	if err != nil {
-		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": friendlyError(err)})
 		return
 	}
 
@@ -316,14 +325,143 @@ func (h *Handler) UpdatePaymentRequestStatus(w http.ResponseWriter, r *http.Requ
 	WriteJSON(w, http.StatusOK, input)
 }
 
-// paySheetHTML renders the bottom-sheet HTML for the payment action, containing both the
-// direct send tab and the BNPL loan tab with friend selector and amount inputs.
-func paySheetHTML(friends []models.Profile, availableCreditCents int) string {
-	friendOpts := `<option value="">Select a friend…</option>`
-	for _, f := range friends {
-		dname := profileDisplayName(&f)
-		friendOpts += `<option value="` + f.ID + `">` + dname + ` · @` + f.ID + `</option>`
+// FulfillPaymentRequest atomically pays a pending payment request on behalf of the session user.
+func (h *Handler) FulfillPaymentRequest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only POST requests are permitted on this route"})
+		return
 	}
+	payerID, authorized := h.authenticateSession(w, r)
+	if !authorized {
+		return
+	}
+	type Input struct {
+		RequestID string `json:"request_id"`
+	}
+	var input Input
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil || strings.TrimSpace(input.RequestID) == "" {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Missing required field: request_id"})
+		return
+	}
+	if err := h.store.FulfillPaymentRequest(input.RequestID, payerID); err != nil {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": friendlyError(err)})
+		return
+	}
+	WriteJSON(w, http.StatusOK, map[string]bool{"success": true})
+}
+
+// GetUnifiedActivity returns the chronological activity feed for the session user,
+// combining payments sent/received and requests sent/received.
+func (h *Handler) GetUnifiedActivity(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only GET requests are permitted on this route"})
+		return
+	}
+	userID, authorized := h.authenticateSession(w, r)
+	if !authorized {
+		return
+	}
+	items, err := h.store.GetUnifiedActivity(userID, 50)
+	if err != nil {
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": friendlyError(err)})
+		return
+	}
+	WriteJSON(w, http.StatusOK, items)
+}
+
+// friendPickerHTML renders a horizontally scrollable avatar grid for friend selection,
+// replacing plain <select> elements in pay, request, and BNPL sheets.
+func friendPickerHTML(pickerID string, friends []models.Profile) string {
+	if len(friends) == 0 {
+		return `<div class="fp-empty">Add friends to get started.</div>`
+	}
+	fallbackColors := []string{"av-indigo", "av-amber", "av-emerald", "av-violet", "av-cyan", "av-pink"}
+	out := ""
+	for i, f := range friends {
+		dname := profileDisplayName(&f)
+		ini := initials(dname)
+		cls := f.ProfileColor
+		if cls == "" {
+			cls = fallbackColors[i%len(fallbackColors)]
+		}
+		safeID := strings.ReplaceAll(f.ID, "'", "")
+		safeName := strings.ReplaceAll(dname, "'", "")
+		out += `<div class="fp-item" data-id="` + f.ID + `" onclick="pickFriend('` + pickerID + `','` + safeID + `','` + safeName + `')" title="` + dname + `">` +
+			`<div class="fp-avatar-sm ` + cls + `">` + ini + `</div>` +
+			`<div class="fp-name">` + safeName + `</div>` +
+			`</div>`
+	}
+	return out
+}
+
+// groupFriendPickerHTML renders groups as fp-item tiles in a horizontally scrollable row,
+// using the exact same component structure as friendPickerHTML — only the data source differs.
+func groupFriendPickerHTML(pickerID string, groups []models.Group) string {
+	if len(groups) == 0 {
+		return `<div class="fp-empty">No groups yet.</div>`
+	}
+	colors := []string{"av-indigo", "av-violet", "av-cyan", "av-emerald", "av-amber", "av-pink"}
+	out := ""
+	for i, g := range groups {
+		ini := ""
+		runes := []rune(g.Name)
+		if len(runes) >= 2 {
+			ini = strings.ToUpper(string(runes[0])) + strings.ToUpper(string(runes[1]))
+		} else if len(runes) == 1 {
+			ini = strings.ToUpper(string(runes[0]))
+		}
+		cls := colors[i%len(colors)]
+		safeGID := strings.ReplaceAll(g.ID, "'", "")
+		safeName := strings.ReplaceAll(g.Name, "'", "")
+		out += `<div class="fp-item" data-id="` + g.ID + `" onclick="pickFriend('` + pickerID + `','` + safeGID + `','` + safeName + `')" title="` + safeName + `">` +
+			`<div class="fp-avatar-sm ` + cls + `">` + ini + `</div>` +
+			`<div class="fp-name">` + safeName + `</div>` +
+			`</div>`
+	}
+	return out
+}
+
+// groupPickerSectionHTML renders a collapsible groups section below the friends picker.
+// Clicking a group row fetches its members via JS and injects them as selectable fp-items.
+func groupPickerSectionHTML(pickerID string, groups []models.Group) string {
+	if len(groups) == 0 {
+		return ""
+	}
+	colors := []string{"av-indigo", "av-violet", "av-cyan", "av-emerald", "av-amber", "av-pink"}
+	rows := ""
+	for i, g := range groups {
+		cls := avatarClass(i)
+		_ = cls
+		colorCls := colors[i%len(colors)]
+		ini := ""
+		runes := []rune(g.Name)
+		if len(runes) >= 2 {
+			ini = strings.ToUpper(string(runes[0])) + strings.ToUpper(string(runes[1]))
+		} else if len(runes) == 1 {
+			ini = strings.ToUpper(string(runes[0]))
+		}
+		safeGID := strings.ReplaceAll(g.ID, "'", "")
+		safeName := strings.ReplaceAll(g.Name, "'", "")
+		rows += `<div class="gp-group-row" onclick="toggleGroupMembers('` + pickerID + `','` + safeGID + `','` + safeName + `',this)">` +
+			`<div class="fp-avatar-sm ` + colorCls + `">` + ini + `</div>` +
+			`<div class="fp-name">` + safeName + `</div>` +
+			`<svg class="gp-chev" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>` +
+			`</div>` +
+			`<div class="gp-members-wrap" id="gpm-` + pickerID + `-` + safeGID + `" style="display:none;padding-left:12px;"></div>`
+	}
+	return `<div class="gp-section">` +
+		`<div class="gp-label">Groups</div>` +
+		rows +
+		`</div>`
+}
+
+// paySheetHTML renders the bottom-sheet HTML for the payment action with an ATM-style
+// amount display and a two-section recipient picker (Friends + Groups) in both panes.
+func paySheetHTML(friends []models.Profile, groups []models.Group, availableCreditCents int) string {
+	payPicker       := friendPickerHTML("pay-recv", friends)
+	bnplPicker      := friendPickerHTML("bnpl-recv", friends)
+	payGroupPicker  := groupFriendPickerHTML("pay-recv", groups)
+	bnplGroupPicker := groupFriendPickerHTML("bnpl-recv", groups)
 
 	return `
 <div class="sheet-backdrop" id="pay-sheet" onclick="if(event.target===this) closeSheet('pay')">
@@ -336,26 +474,24 @@ func paySheetHTML(friends []models.Profile, availableCreditCents int) string {
     </div>
 
     <div class="sheet-pane active" data-pay-pane="send">
-      <div class="amount-big mono"><span class="dollar">$</span><span id="send-amt">0.00</span></div>
+      <div class="amount-big mono atm-wrap" data-atm="pay-send" id="pay-send-atm" tabindex="0" onclick="this.focus()">
+        <span class="dollar">$</span><span id="pay-send-display">0.00</span><span class="atm-cursor"></span>
+      </div>
       <div class="chip-row" style="justify-content:center;">
-        <button type="button" class="chip" onclick="setSendAmt(10)">$10</button>
-        <button type="button" class="chip" onclick="setSendAmt(25)">$25</button>
-        <button type="button" class="chip" onclick="setSendAmt(50)">$50</button>
-        <button type="button" class="chip" onclick="setSendAmt(100)">$100</button>
+        <button type="button" class="chip" onclick="setAtmCents('pay-send',1000)">$10</button>
+        <button type="button" class="chip" onclick="setAtmCents('pay-send',2500)">$25</button>
+        <button type="button" class="chip" onclick="setAtmCents('pay-send',5000)">$50</button>
+        <button type="button" class="chip" onclick="setAtmCents('pay-send',10000)">$100</button>
       </div>
       <div>
-        <label class="modal-lbl">To</label>
-        <select class="modal-sel" id="pay-receiver-sel">` + friendOpts + `</select>
+        <div style="font-size:17px;font-weight:700;color:var(--text);letter-spacing:-0.01em;margin-bottom:14px;">Choose a Recipient</div>
+        <label class="modal-lbl">Friends</label>
+        <div class="friend-picker" id="pay-recv-picker">` + payPicker + `</div>
+        <input type="hidden" id="pay-recv-val" value="" />
+        <label class="modal-lbl" style="margin-top:14px;display:block;">Groups</label>
+        <div class="friend-picker" id="pay-recv-group-picker">` + payGroupPicker + `</div>
       </div>
-      <div>
-        <label class="modal-lbl">Amount</label>
-        <input class="modal-inp" id="pay-amount-inp" type="number" inputmode="decimal" placeholder="0.00"
-               oninput="document.getElementById('send-amt').textContent=parseFloat(this.value||0).toFixed(2)" />
-      </div>
-      <div>
-        <label class="modal-lbl">Note</label>
-        <input class="modal-inp" id="pay-note-inp" type="text" placeholder="Dinner, rent, etc." />
-      </div>
+      <div><label class="modal-lbl">Note</label><input class="modal-inp" id="pay-note-inp" type="text" placeholder="Dinner, rent, etc." /></div>
       <button class="submit-btn" onclick="submitSendPayment()">Send payment</button>
     </div>
 
@@ -364,40 +500,51 @@ func paySheetHTML(friends []models.Profile, availableCreditCents int) string {
         <span class="label">Available credit</span>
         <span class="val mono">$` + fmt.Sprintf("%d.%02d", availableCreditCents/100, availableCreditCents%100) + `</span>
       </div>
-      <div>
-        <label class="modal-lbl">Recipient</label>
-        <select class="modal-sel" id="bnpl-receiver-sel">` + friendOpts + `</select>
+      <div class="amount-big mono atm-wrap" data-atm="bnpl" id="bnpl-atm" tabindex="0" onclick="this.focus()">
+        <span class="dollar">$</span><span id="bnpl-display">0.00</span><span class="atm-cursor"></span>
+      </div>
+      <div class="chip-row" style="justify-content:center;">
+        <button type="button" class="chip" onclick="setAtmCents('bnpl',1000)">$10</button>
+        <button type="button" class="chip" onclick="setAtmCents('bnpl',2000)">$20</button>
+        <button type="button" class="chip" onclick="setAtmCents('bnpl',5000)">$50</button>
+        <button type="button" class="chip" onclick="setAtmCents('bnpl',10000)">$100</button>
       </div>
       <div>
-        <label class="modal-lbl">Purchase amount</label>
-        <input class="modal-inp" id="bnpl-amount-inp" type="number" inputmode="decimal" placeholder="0.00" />
+        <div style="font-size:17px;font-weight:700;color:var(--text);letter-spacing:-0.01em;margin-bottom:14px;">Choose a Recipient</div>
+        <label class="modal-lbl">Friends</label>
+        <div class="friend-picker" id="bnpl-recv-picker">` + bnplPicker + `</div>
+        <input type="hidden" id="bnpl-recv-val" value="" />
+        <label class="modal-lbl" style="margin-top:14px;display:block;">Groups</label>
+        <div class="friend-picker" id="bnpl-recv-group-picker">` + bnplGroupPicker + `</div>
       </div>
-      <div>
-        <label class="modal-lbl">Plan</label>
-        <select class="modal-sel" id="bnpl-plan-sel">
-          <option value="4">Pay-in-4 (0% APR · 4 payments over 6 weeks)</option>
-          <option value="6">Pay-in-6 (12.99% APR · 6 monthly payments)</option>
-          <option value="12">Pay-in-12 (15.99% APR · 12 monthly payments)</option>
-        </select>
+      <div id="bnpl-breakdown" style="display:none;background:var(--surface-3);border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin-top:4px;">
+        <div style="font-size:11px;font-weight:700;color:var(--text-mute);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:10px;">Pay-in-4 breakdown</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+          <span style="font-size:13px;color:var(--text-dim);">Amount due now</span>
+          <span id="bnpl-due-now" class="mono" style="font-size:14px;font-weight:700;color:var(--emerald-hi);">$0.00</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+          <span style="font-size:13px;color:var(--text-dim);">3 × every 2 weeks</span>
+          <span id="bnpl-recurring" class="mono" style="font-size:14px;font-weight:700;color:var(--text);">$0.00</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;padding-top:8px;border-top:1px solid var(--border-soft);">
+          <span style="font-size:13px;color:var(--text-dim);">Interest rate</span>
+          <span id="bnpl-rate-display" class="mono" style="font-size:13px;font-weight:700;color:var(--amber-hi);">0%</span>
+        </div>
       </div>
-      <div>
-        <label class="modal-lbl">Note</label>
-        <input class="modal-inp" id="bnpl-note-inp" type="text" placeholder="Item or purchase description" />
-      </div>
+      <input type="hidden" id="bnpl-total-cents" value="0" />
+      <div><label class="modal-lbl">Note</label><input class="modal-inp" id="bnpl-note-inp" type="text" placeholder="Item or purchase description" /></div>
       <button class="submit-btn emerald" onclick="submitBNPL()">Approve plan</button>
     </div>
   </div>
 </div>`
 }
 
-// requestSheetHTML renders the bottom-sheet HTML for creating a money request,
-// with a friend selector, amount input, and note field.
-func requestSheetHTML(friends []models.Profile) string {
-	friendOpts := `<option value="">Select a friend…</option>`
-	for _, f := range friends {
-		dname := profileDisplayName(&f)
-		friendOpts += `<option value="` + f.ID + `">` + dname + ` · @` + f.ID + `</option>`
-	}
+// requestSheetHTML renders the bottom-sheet HTML for creating a money request
+// with an ATM-style amount display and a two-section recipient picker (Friends + Groups).
+func requestSheetHTML(friends []models.Profile, groups []models.Group) string {
+	reqPicker := friendPickerHTML("req-from", friends)
+	reqGroupPicker := groupFriendPickerHTML("req-from", groups)
 
 	return `
 <div class="sheet-backdrop" id="request-sheet" onclick="if(event.target===this) closeSheet('request')">
@@ -405,26 +552,24 @@ func requestSheetHTML(friends []models.Profile) string {
     <div class="sheet-handle"></div>
     <div class="sheet-title">Request money</div>
     <div class="sheet-pane active" style="display:flex;">
-      <div class="amount-big mono"><span class="dollar">$</span><span id="req-amt">0.00</span></div>
+      <div class="amount-big mono atm-wrap" data-atm="req" id="req-atm" tabindex="0" onclick="this.focus()">
+        <span class="dollar">$</span><span id="req-display">0.00</span><span class="atm-cursor"></span>
+      </div>
       <div class="chip-row" style="justify-content:center;">
-        <button type="button" class="chip" onclick="setReqAmt(10)">$10</button>
-        <button type="button" class="chip" onclick="setReqAmt(25)">$25</button>
-        <button type="button" class="chip" onclick="setReqAmt(50)">$50</button>
-        <button type="button" class="chip" onclick="setReqAmt(100)">$100</button>
+        <button type="button" class="chip" onclick="setAtmCents('req',1000)">$10</button>
+        <button type="button" class="chip" onclick="setAtmCents('req',2500)">$25</button>
+        <button type="button" class="chip" onclick="setAtmCents('req',5000)">$50</button>
+        <button type="button" class="chip" onclick="setAtmCents('req',10000)">$100</button>
       </div>
       <div>
-        <label class="modal-lbl">Request from</label>
-        <select class="modal-sel" id="req-payer-sel">` + friendOpts + `</select>
+        <div style="font-size:17px;font-weight:700;color:var(--text);letter-spacing:-0.01em;margin-bottom:14px;">Choose a Recipient</div>
+        <label class="modal-lbl">Friends</label>
+        <div class="friend-picker" id="req-from-picker">` + reqPicker + `</div>
+        <input type="hidden" id="req-from-val" value="" />
+        <label class="modal-lbl" style="margin-top:14px;display:block;">Groups</label>
+        <div class="friend-picker" id="req-from-group-picker">` + reqGroupPicker + `</div>
       </div>
-      <div>
-        <label class="modal-lbl">Amount</label>
-        <input class="modal-inp" id="req-amount-inp" type="number" inputmode="decimal" placeholder="0.00"
-               oninput="document.getElementById('req-amt').textContent=parseFloat(this.value||0).toFixed(2)" />
-      </div>
-      <div>
-        <label class="modal-lbl">Note</label>
-        <input class="modal-inp" id="req-note-inp" type="text" placeholder="What's it for?" />
-      </div>
+      <div><label class="modal-lbl">Note</label><input class="modal-inp" id="req-note-inp" type="text" placeholder="What's it for?" /></div>
       <button class="submit-btn amber" onclick="submitRequest()">Send request</button>
     </div>
   </div>

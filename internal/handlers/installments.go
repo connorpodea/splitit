@@ -38,7 +38,7 @@ func (h *Handler) CreateBNPLLoan(w http.ResponseWriter, r *http.Request) {
 	// Pass the populated struct down to the database engine
 	err = h.store.CreateBNPLLoan(&input)
 	if err != nil {
-		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": friendlyError(err)})
 		return
 	}
 
@@ -83,7 +83,7 @@ func (h *Handler) PayInstallment(w http.ResponseWriter, r *http.Request) {
 	// Pass the populated struct down to the database engine
 	err = h.store.PayInstallment(input.InstallmentID, input.PaymentID, input.UserID, input.AmountCents)
 	if err != nil {
-		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": friendlyError(err)})
 		return
 	}
 
@@ -108,7 +108,7 @@ func (h *Handler) ListInstallments(w http.ResponseWriter, r *http.Request) {
 	// Query the database engine for this user's installments
 	installments, err := h.store.ListInstallments(userID)
 	if err != nil {
-		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": friendlyError(err)})
 		return
 	}
 
@@ -133,7 +133,7 @@ func (h *Handler) ListOverdueInstallments(w http.ResponseWriter, r *http.Request
 	// Query the database engine for this user's overdue installments
 	installments, err := h.store.ListOverdueInstallments(userID)
 	if err != nil {
-		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": friendlyError(err)})
 		return
 	}
 
@@ -166,7 +166,7 @@ func (h *Handler) GetPaymentWithInstallments(w http.ResponseWriter, r *http.Requ
 	// Query the database engine for the master payment record and its installment schedule
 	result, err := h.store.GetPaymentWithInstallments(paymentID)
 	if err != nil {
-		WriteJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		WriteJSON(w, http.StatusNotFound, map[string]string{"error": friendlyError(err)})
 		return
 	}
 
@@ -192,7 +192,7 @@ func (h *Handler) GetInstallmentSummary(w http.ResponseWriter, r *http.Request) 
 	// Query the database engine for this user's installment portfolio aggregate metrics
 	summary, err := h.store.GetInstallmentSummary(userID)
 	if err != nil {
-		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": friendlyError(err)})
 		return
 	}
 

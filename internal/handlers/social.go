@@ -40,7 +40,7 @@ func (h *Handler) SendFriendRequest(w http.ResponseWriter, r *http.Request) {
 	// Pass the populated struct down to the database engine
 	err = h.store.SendFriendRequest(&input)
 	if err != nil {
-		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": friendlyError(err)})
 		return
 	}
 
@@ -65,7 +65,7 @@ func (h *Handler) ListIncomingFriendRequests(w http.ResponseWriter, r *http.Requ
 	// Query the database engine for this user's incoming friend requests
 	requests, err := h.store.ListIncomingFriendRequests(userID)
 	if err != nil {
-		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": friendlyError(err)})
 		return
 	}
 
@@ -90,7 +90,7 @@ func (h *Handler) ListOutgoingFriendRequests(w http.ResponseWriter, r *http.Requ
 	// Query the database engine for this user's outgoing friend requests
 	requests, err := h.store.ListOutgoingFriendRequests(userID)
 	if err != nil {
-		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": friendlyError(err)})
 		return
 	}
 
@@ -127,7 +127,7 @@ func (h *Handler) AcceptFriendRequest(w http.ResponseWriter, r *http.Request) {
 	// senderID is derived inside the store from the database — not trusted from the client
 	err = h.store.AcceptFriendRequest(input.RequestID, receiverID)
 	if err != nil {
-		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": friendlyError(err)})
 		return
 	}
 
@@ -165,7 +165,7 @@ func (h *Handler) DeclineFriendRequest(w http.ResponseWriter, r *http.Request) {
 	// Pass the variable down to the database engine
 	err = h.store.DeclineFriendRequest(input.RequestID)
 	if err != nil {
-		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": friendlyError(err)})
 		return
 	}
 
@@ -204,7 +204,7 @@ func (h *Handler) RemoveFriendMutual(w http.ResponseWriter, r *http.Request) {
 	// Pass the verified identity along with request payload details down to the storage layers
 	err = h.store.RemoveFriendMutual(userID, input.FriendID)
 	if err != nil {
-		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": friendlyError(err)})
 		return
 	}
 
@@ -229,7 +229,7 @@ func (h *Handler) ListFriends(w http.ResponseWriter, r *http.Request) {
 	// Query the database engine for this users friends
 	friends, err := h.store.ListFriends(userID)
 	if err != nil {
-		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": friendlyError(err)})
 		return
 	}
 
@@ -339,6 +339,7 @@ func friendsRows(friends []models.Profile) string {
 			}
 		}
 		searchKey := strings.ToLower(dname + " @" + f.ID)
+		safeDname := strings.ReplaceAll(dname, "'", "")
 		out += `
     <div class="friend-row" data-name="` + searchKey + `" data-friend-id="` + f.ID + `">
       <div class="row-avatar ` + cls + `">` + ini + `</div>
@@ -347,6 +348,9 @@ func friendsRows(friends []models.Profile) string {
         <div>@` + f.ID + `</div>
       </div>
       <div class="friend-actions">
+        <button title="History" onclick="openHistorySheet('` + f.ID + `','` + safeDname + `')">
+          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.51"/></svg>
+        </button>
         <button title="Pay" onclick="openPayToFriend('` + f.ID + `')">
           <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
         </button>

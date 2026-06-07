@@ -13,16 +13,18 @@ type User struct {
 	CreditScore      uint8  `json:"credit_score"`
 	CreditLimitCents int    `json:"credit_limit_cents"`
 	IsActive         bool   `json:"is_active"`
+	ProfileColor     string `json:"profile_color"`
 	CreatedAt        string `json:"created_at"`
 }
 
 // Profile is the public-facing subset of a User, safe to expose to other users.
 type Profile struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Email       string `json:"email"`
-	PhoneNumber string `json:"phone_number"`
-	CreatedAt   string `json:"created_at"`
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	Email        string `json:"email"`
+	PhoneNumber  string `json:"phone_number"`
+	ProfileColor string `json:"profile_color"`
+	CreatedAt    string `json:"created_at"`
 }
 
 // Payment records a single monetary transfer between two accounts, including BNPL master loan records.
@@ -114,7 +116,6 @@ type Notification struct {
 // UserSettings holds per-user preference and privacy configuration stored in the user_settings table.
 type UserSettings struct {
 	UserID             string    `json:"user_id"`
-	Theme              string    `json:"theme"`
 	EmailNotifications bool      `json:"email_notifications"`
 	IsDiscoverable     bool      `json:"is_discoverable"`
 	UpdatedAt          time.Time `json:"updated_at"`
@@ -159,24 +160,24 @@ type InstallmentSummary struct {
 	TotalOverdueCents     int `json:"total_overdue_cents"`
 }
 
-// LinkedCard represents a tokenized external funding instrument registered to a user account.
-// Raw card numbers are never stored — only opaque provider token references.
-type LinkedCard struct {
-	ID        string `json:"id"`
-	UserID    string `json:"user_id"`
-	TokenRef  string `json:"token_ref"`
-	Last4     string `json:"last4"`
-	Brand     string `json:"brand"`
-	IsDefault bool   `json:"is_default"`
-	CreatedAt string `json:"created_at"`
-}
-
 // WalletTransaction records an absolute balance mutation event (deposit or withdrawal) on a user account.
 // Distinct from peer-to-peer Payment records in the payments ledger.
 type WalletTransaction struct {
 	ID              string `json:"id"`
 	UserID          string `json:"user_id"`
 	AmountCents     int    `json:"amount_cents"`
-	TransactionType string `json:"type"` // "deposit" | "withdrawal"
+	TransactionType string `json:"transaction_type"` // "deposit" | "withdrawal"
 	CreatedAt       string `json:"created_at"`
+}
+
+// ActivityItem is a unified feed entry combining payments sent/received and requests made/received.
+type ActivityItem struct {
+	Kind        string `json:"kind"`         // "payment_sent"|"payment_received"|"request_sent"|"request_received"
+	ID          string `json:"id"`
+	PeerID      string `json:"peer_id"`
+	PeerName    string `json:"peer_name"`
+	AmountCents int    `json:"amount_cents"`
+	Note        string `json:"note"`
+	Status      string `json:"status"`
+	CreatedAt   string `json:"created_at"`
 }

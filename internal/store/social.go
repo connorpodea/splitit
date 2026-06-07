@@ -224,7 +224,7 @@ func (s *Store) RemoveFriendMutual(userID, friendID string) error {
 func (s *Store) ListFriends(userID string) ([]models.Profile, error) {
 	// Look up all friends of the current user and use the friends' IDs to return their profile
 	query := `
-	SELECT users.id, users.name, users.email, users.phone_number, users.created_at
+	SELECT users.id, users.name, users.email, users.phone_number, users.profile_color, users.created_at
 	FROM friends
 	JOIN users ON friends.friend_id = users.id
 	WHERE friends.user_id = ? AND users.is_active = 1
@@ -246,6 +246,7 @@ func (s *Store) ListFriends(userID string) ([]models.Profile, error) {
 			&friend.Name,
 			&friend.Email,
 			&friend.PhoneNumber,
+			&friend.ProfileColor,
 			&friend.CreatedAt,
 		)
 		if err != nil {

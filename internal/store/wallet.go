@@ -71,6 +71,14 @@ func (s *Store) Deposit(userID string, amountCents int) error {
 		return fmt.Errorf("deposit rejected: user account ID '%s' not found in user registry", userID)
 	}
 
+	_, err = transaction.Exec(
+		`INSERT INTO wallet_transactions (id, user_id, amount_cents, transaction_type) VALUES (?, ?, ?, 'deposit');`,
+		create_new_ID(), userID, amountCents,
+	)
+	if err != nil {
+		return fmt.Errorf("deposit failed: unable to record wallet transaction for user '%s': %w", userID, err)
+	}
+
 	if err = transaction.Commit(); err != nil {
 		return fmt.Errorf("critical ledger engine mismatch: failed to write deposit modifications to disk on final commit sequence: %w", err)
 	}
@@ -91,6 +99,14 @@ func (s *Store) Withdraw(userID string, amountCents int) error {
 	}
 	defer transaction.Rollback()
 
+	var currentBalance int
+	if err = transaction.QueryRow(`SELECT balance_cents FROM users WHERE id = ?;`, userID).Scan(&currentBalance); err != nil {
+		return fmt.Errorf("withdrawal rejected: unable to verify balance for user '%s': %w", userID, err)
+	}
+	if currentBalance < amountCents {
+		return fmt.Errorf("withdrawal rejected: insufficient funds — balance is %d cents, requested %d cents", currentBalance, amountCents)
+	}
+
 	result, err := transaction.Exec(query, amountCents, userID)
 	if err != nil {
 		return fmt.Errorf("failed to clear balance withdraw allocation of %d cents for user ID '%s': %w", amountCents, userID, err)
@@ -102,6 +118,14 @@ func (s *Store) Withdraw(userID string, amountCents int) error {
 	}
 	if rowsAffected == 0 {
 		return fmt.Errorf("withdrawal rejected: user account ID '%s' not found in user registry", userID)
+	}
+
+	_, err = transaction.Exec(
+		`INSERT INTO wallet_transactions (id, user_id, amount_cents, transaction_type) VALUES (?, ?, ?, 'withdrawal');`,
+		create_new_ID(), userID, amountCents,
+	)
+	if err != nil {
+		return fmt.Errorf("withdrawal failed: unable to record wallet transaction for user '%s': %w", userID, err)
 	}
 
 	if err = transaction.Commit(); err != nil {

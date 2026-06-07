@@ -86,7 +86,7 @@ func (s *Store) ListGroups(userID string) ([]models.Group, error) {
 // ListGroupMembers returns the public profile of every active member in a group, ordered by name.
 func (s *Store) ListGroupMembers(groupID string) ([]models.Profile, error) {
 	query := `
-	SELECT users.id, users.name, users.email, users.phone_number, users.created_at
+	SELECT users.id, users.name, users.email, users.phone_number, users.profile_color, users.created_at
 	FROM users
 	JOIN group_members ON group_members.member_id = users.id
 	WHERE group_members.group_id = ? AND users.is_active = 1
@@ -108,6 +108,7 @@ func (s *Store) ListGroupMembers(groupID string) ([]models.Profile, error) {
 			&m.Name,
 			&m.Email,
 			&m.PhoneNumber,
+			&m.ProfileColor,
 			&m.CreatedAt,
 		)
 		if err != nil {
@@ -123,17 +124,32 @@ func (s *Store) ListGroupMembers(groupID string) ([]models.Profile, error) {
 	return members, nil
 }
 
-// SendGroupInvitation creates a pending invitation record from a sender to a receiver for a specific group.
+// SendGroupInvitation creates a pending invitation record from a sender to a receiver for a specific group,
+// then dispatches a notification to the receiver so it appears in their Notification Center.
 func (s *Store) SendGroupInvitation(groupID, senderID, receiverID string) error {
+	var groupName string
+	if err := s.db.QueryRow(`SELECT name FROM groups WHERE id = ?;`, groupID).Scan(&groupName); err != nil {
+		groupName = "a group"
+	}
+
 	query := `
-	INSERT INTO group_invitations 
-	(id, group_id, sender_id, receiver_id) 
+	INSERT INTO group_invitations
+	(id, group_id, sender_id, receiver_id)
 	VALUES (?,?,?,?);`
 
 	_, err := s.db.Exec(query, create_new_ID(), groupID, senderID, receiverID)
 	if err != nil {
 		return fmt.Errorf("failed to insert group invitation from sender '%s' to receiver '%s' for group ID '%s': %w", senderID, receiverID, groupID, err)
 	}
+
+	go s.CreateNotification(&models.Notification{
+		UserID:   receiverID,
+		Type:     "group_invitation",
+		Title:    "Group invitation",
+		Body:     fmt.Sprintf("@%s invited you to join %s", senderID, groupName),
+		LinkView: "groups",
+	})
+
 	return nil
 }
 
@@ -326,6 +342,51 @@ func (s *Store) RemoveGroupMember(groupID, targetUserID string) error {
 		return fmt.Errorf("failed to finalize group member removal on disk commit: %w", err)
 	}
 	return nil
+}
+
+// ListGroupActivity returns all payments where both the sender and receiver are members of the
+// specified group, ordered by most recent first. Limited to 50 records.
+func (s *Store) ListGroupActivity(groupID string) ([]models.Payment, error) {
+	query := `
+	SELECT id, sender_id, receiver_id, amount_cents, total_amount_cents, note, payment_type, total_installments, status, created_at
+	FROM payments
+	WHERE sender_id   IN (SELECT member_id FROM group_members WHERE group_id = ?)
+	  AND receiver_id IN (SELECT member_id FROM group_members WHERE group_id = ?)
+	ORDER BY created_at DESC
+	LIMIT 50;`
+
+	rows, err := s.db.Query(query, groupID, groupID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query activity log for group ID '%s': %w", groupID, err)
+	}
+	defer rows.Close()
+
+	payments := []models.Payment{}
+
+	for rows.Next() {
+		var p models.Payment
+		err = rows.Scan(
+			&p.ID,
+			&p.SenderID,
+			&p.ReceiverID,
+			&p.AmountCents,
+			&p.TotalAmountCents,
+			&p.Note,
+			&p.PaymentType,
+			&p.TotalInstallments,
+			&p.Status,
+			&p.CreatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan payment row into model for group activity query: %w", err)
+		}
+		payments = append(payments, p)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("error encountered during group activity row scanning for group ID '%s': %w", groupID, err)
+	}
+	return payments, nil
 }
 
 // LeaveGroup removes the calling user from a group's membership roster voluntarily.

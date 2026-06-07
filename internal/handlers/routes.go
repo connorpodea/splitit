@@ -19,6 +19,7 @@ func (h *Handler) RegisterRoutes() {
 	http.HandleFunc("/users/update/email", h.UpdateEmail)
 	http.HandleFunc("/users/update/phone", h.UpdatePhoneNumber)
 	http.HandleFunc("/users/update/name", h.UpdateDisplayName)
+	http.HandleFunc("/users/update/color", h.UpdateProfileColor)
 	http.HandleFunc("/users/deactivate", h.DeactivateAccount)
 	http.HandleFunc("/profiles/list", h.ListProfiles)
 	http.HandleFunc("/profiles/get", h.GetProfile)
@@ -32,9 +33,11 @@ func (h *Handler) RegisterRoutes() {
 	http.HandleFunc("/payments/history", h.ListPaymentsByUser)
 	http.HandleFunc("/payments/between", h.ListPaymentsBetweenUsers)
 	http.HandleFunc("/payments/request/create", h.CreatePaymentRequest)
+	http.HandleFunc("/payments/request/fulfill", h.FulfillPaymentRequest)
 	http.HandleFunc("/payments/request/incoming", h.ListIncomingPaymentRequests)
 	http.HandleFunc("/payments/request/outgoing", h.ListOutgoingPaymentRequests)
 	http.HandleFunc("/payments/request/update", h.UpdatePaymentRequestStatus)
+	http.HandleFunc("/payments/activity", h.GetUnifiedActivity)
 
 	// BNPL Loans & Installments
 	http.HandleFunc("/bnpl/loan/create", h.CreateBNPLLoan)
@@ -64,6 +67,7 @@ func (h *Handler) RegisterRoutes() {
 	http.HandleFunc("/groups/invite/outgoing", h.ListOutgoingGroupInvitations)
 	http.HandleFunc("/groups/member/remove", h.RemoveGroupMember)
 	http.HandleFunc("/groups/leave", h.LeaveGroup)
+	http.HandleFunc("/groups/activity", h.ListGroupActivity)
 
 	// Notifications
 	http.HandleFunc("/notifications/list", h.ListNotifications)
@@ -82,12 +86,7 @@ func (h *Handler) RegisterRoutes() {
 	http.HandleFunc("/wallet/bnpl/utilization", h.GetBNPLUtilization)
 	http.HandleFunc("/wallet/credit/history", h.GetCreditScoreHistory)
 
-	// Settings & Linked Cards
+	// Settings
 	http.HandleFunc("/settings/get", h.GetUserSettings)
 	http.HandleFunc("/settings/update", h.UpdateUserSettings)
-	http.HandleFunc("/settings/cards/add", h.CreateLinkedCard)
-	http.HandleFunc("/settings/cards/delete", h.DeleteLinkedCard)
-	http.HandleFunc("/settings/cards/list", h.ListLinkedCards)
-	http.HandleFunc("/settings/cards/get", h.GetLinkedCard)
-	http.HandleFunc("/settings/cards/default", h.SetDefaultCard)
 }

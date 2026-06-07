@@ -124,8 +124,8 @@ func (s *Store) CreateBNPLLoan(payment *models.Payment) error {
 		} else {
 			installmentAmountCents = baseAmountCents
 			isPaid = false
-			// Stagger deadlines by 7 days multiplied by the installment index
-			dueDate = currentTime.AddDate(0, 0, int(i-1)*7)
+			// Bi-weekly schedule: installment 2 at day 14, 3 at day 28, 4 at day 42
+			dueDate = currentTime.AddDate(0, 0, int(i-1)*14)
 		}
 
 		// Generate a structured identifier for each installment row

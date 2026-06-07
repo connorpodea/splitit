@@ -86,6 +86,26 @@ func (s *Store) Pay(payment *models.Payment) error {
 		return fmt.Errorf("ledger settlement failed: historical transaction entry creation with ID '%s' rejected by database: %w", payment.ID, err)
 	}
 
+	// Record wallet activity for real users only (skip app_treasury internal transfers)
+	if payment.SenderID != "app_treasury" {
+		_, err = transaction.Exec(
+			`INSERT INTO wallet_transactions (id, user_id, amount_cents, transaction_type) VALUES (?, ?, ?, 'withdrawal');`,
+			create_new_ID(), payment.SenderID, payment.AmountCents,
+		)
+		if err != nil {
+			return fmt.Errorf("ledger settlement failed: unable to record withdrawal for sender '%s': %w", payment.SenderID, err)
+		}
+	}
+	if payment.ReceiverID != "app_treasury" {
+		_, err = transaction.Exec(
+			`INSERT INTO wallet_transactions (id, user_id, amount_cents, transaction_type) VALUES (?, ?, ?, 'deposit');`,
+			create_new_ID(), payment.ReceiverID, payment.TotalAmountCents,
+		)
+		if err != nil {
+			return fmt.Errorf("ledger settlement failed: unable to record deposit for receiver '%s': %w", payment.ReceiverID, err)
+		}
+	}
+
 	if err = transaction.Commit(); err != nil {
 		return fmt.Errorf("critical engine tracking mismatch: failed to write block modifications to disk on final commit sequence: %w", err)
 	}
@@ -95,7 +115,7 @@ func (s *Store) Pay(payment *models.Payment) error {
 		UserID:   payment.ReceiverID,
 		Type:     "payment_received",
 		Title:    "Payment received",
-		Body:     fmt.Sprintf("@%s paid you %d cents", payment.SenderID, payment.AmountCents),
+		Body:     fmt.Sprintf("@%s sent you $%.2f", payment.SenderID, float64(payment.AmountCents)/100),
 		LinkView: "activity",
 	})
 	return nil
@@ -317,6 +337,7 @@ func (s *Store) CreatePaymentRequest(request *models.PaymentRequest) error {
 	if request.ID == "" {
 		request.ID = create_new_ID()
 	}
+	request.Status = "pending"
 
 	query := `
 	INSERT INTO payment_requests
@@ -332,7 +353,7 @@ func (s *Store) CreatePaymentRequest(request *models.PaymentRequest) error {
 		UserID:   request.PayerID,
 		Type:     "payment_request",
 		Title:    "Payment request",
-		Body:     fmt.Sprintf("@%s is requesting %d cents from you", request.RequesterID, request.AmountCents),
+		Body:     fmt.Sprintf("@%s is requesting $%.2f from you", request.RequesterID, float64(request.AmountCents)/100),
 		LinkView: "activity",
 	})
 	return nil
@@ -442,4 +463,313 @@ func (s *Store) UpdatePaymentRequestStatus(paymentID, newStatus string) error {
 	}
 
 	return nil
+}
+
+// PayToGroup fans a single payment out to every group member except the sender,
+// splitting the total equally. The entire operation is a single atomic transaction —
+// if any member credit fails, all balance changes are rolled back.
+func (s *Store) PayToGroup(payment *models.Payment) error {
+	if payment.ID == "" {
+		payment.ID = create_new_ID()
+	}
+
+	members, err := s.ListGroupMembers(payment.ReceiverID)
+	if err != nil {
+		return fmt.Errorf("group payment failed: unable to resolve member roster for group '%s': %w", payment.ReceiverID, err)
+	}
+
+	recipients := make([]models.Profile, 0, len(members))
+	for _, m := range members {
+		if m.ID != payment.SenderID {
+			recipients = append(recipients, m)
+		}
+	}
+	if len(recipients) == 0 {
+		return fmt.Errorf("group payment rejected: no eligible recipients (sender may be the only member)")
+	}
+
+	perPersonCents := payment.AmountCents / len(recipients)
+	remainderCents := payment.AmountCents % len(recipients)
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("group payment failed: unable to open transaction context: %w", err)
+	}
+	defer tx.Rollback()
+
+	var senderBalance int
+	if err = tx.QueryRow(`SELECT balance_cents FROM users WHERE id = ?;`, payment.SenderID).Scan(&senderBalance); err != nil {
+		return fmt.Errorf("group payment failed: unable to verify sender funds for '%s': %w", payment.SenderID, err)
+	}
+	if senderBalance < payment.AmountCents {
+		return fmt.Errorf("group payment rejected: insufficient funds (balance: %d cents, total required: %d cents)", senderBalance, payment.AmountCents)
+	}
+
+	if _, err = tx.Exec(`UPDATE users SET balance_cents = balance_cents - ? WHERE id = ?;`, payment.AmountCents, payment.SenderID); err != nil {
+		return fmt.Errorf("group payment failed: unable to deduct %d cents from sender '%s': %w", payment.AmountCents, payment.SenderID, err)
+	}
+	if _, err = tx.Exec(`INSERT INTO wallet_transactions (id, user_id, amount_cents, transaction_type) VALUES (?, ?, ?, 'withdrawal');`, create_new_ID(), payment.SenderID, payment.AmountCents); err != nil {
+		return fmt.Errorf("group payment failed: unable to record sender withdrawal for '%s': %w", payment.SenderID, err)
+	}
+
+	for i, recipient := range recipients {
+		amount := perPersonCents
+		if i == 0 {
+			amount += remainderCents
+		}
+
+		result, err := tx.Exec(`UPDATE users SET balance_cents = balance_cents + ? WHERE id = ?;`, amount, recipient.ID)
+		if err != nil {
+			return fmt.Errorf("group payment failed: unable to credit member '%s': %w", recipient.ID, err)
+		}
+		rows, _ := result.RowsAffected()
+		if rows == 0 {
+			return fmt.Errorf("group payment failed: member account '%s' not found in user registry", recipient.ID)
+		}
+
+		splitID := fmt.Sprintf("split_%s_%d", payment.ID, i)
+		if _, err = tx.Exec(
+			`INSERT INTO payments (id, sender_id, receiver_id, amount_cents, total_amount_cents, note, payment_type, total_installments, status) VALUES (?, ?, ?, ?, ?, ?, 'group_split', 1, 'completed');`,
+			splitID, payment.SenderID, recipient.ID, amount, amount, payment.Note,
+		); err != nil {
+			return fmt.Errorf("group payment failed: unable to record split payment record for member '%s': %w", recipient.ID, err)
+		}
+
+		if _, err = tx.Exec(`INSERT INTO wallet_transactions (id, user_id, amount_cents, transaction_type) VALUES (?, ?, ?, 'deposit');`, create_new_ID(), recipient.ID, amount); err != nil {
+			return fmt.Errorf("group payment failed: unable to record deposit for member '%s': %w", recipient.ID, err)
+		}
+	}
+
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("group payment failed: transaction commit rejected: %w", err)
+	}
+
+	for _, recipient := range recipients {
+		r := recipient
+		go s.CreateNotification(&models.Notification{
+			UserID:   r.ID,
+			Type:     "payment_received",
+			Title:    "Group payment received",
+			Body:     fmt.Sprintf("@%s paid you as part of a group split", payment.SenderID),
+			LinkView: "activity",
+		})
+	}
+
+	return nil
+}
+
+// RequestFromGroup creates one payment request per group member (excluding the requester),
+// splitting the total amount equally in a single atomic transaction.
+func (s *Store) RequestFromGroup(request *models.PaymentRequest) error {
+	// Fully consume the member cursor before opening a write transaction to avoid
+	// SQLite "cannot start a transaction within a transaction" on single-connection mode.
+	members, err := s.ListGroupMembers(request.PayerID)
+	if err != nil {
+		return fmt.Errorf("group request failed: unable to resolve member roster for group '%s': %w", request.PayerID, err)
+	}
+
+	recipients := make([]models.Profile, 0, len(members))
+	for _, m := range members {
+		if m.ID != request.RequesterID {
+			recipients = append(recipients, m)
+		}
+	}
+	if len(recipients) == 0 {
+		return fmt.Errorf("group request rejected: no eligible payers (requester may be the only member)")
+	}
+
+	perPersonCents := request.AmountCents / len(recipients)
+	remainderCents := request.AmountCents % len(recipients)
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("group request failed: unable to open transaction context: %w", err)
+	}
+	defer tx.Rollback()
+
+	type inserted struct {
+		payerID     string
+		amountCents int
+	}
+	rows := make([]inserted, 0, len(recipients))
+
+	for i, recipient := range recipients {
+		amount := perPersonCents
+		if i == 0 {
+			amount += remainderCents
+		}
+		id := create_new_ID()
+		if _, err = tx.Exec(
+			`INSERT INTO payment_requests (id, requester_id, payer_id, amount_cents, note, status) VALUES (?, ?, ?, ?, ?, 'pending');`,
+			id, request.RequesterID, recipient.ID, amount, request.Note,
+		); err != nil {
+			return fmt.Errorf("group request failed: unable to insert split request for member '%s': %w", recipient.ID, err)
+		}
+		rows = append(rows, inserted{payerID: recipient.ID, amountCents: amount})
+	}
+
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("group request failed: transaction commit rejected: %w", err)
+	}
+
+	for _, r := range rows {
+		r := r
+		go s.CreateNotification(&models.Notification{
+			UserID:   r.payerID,
+			Type:     "payment_request",
+			Title:    "Payment request",
+			Body:     fmt.Sprintf("@%s is requesting $%.2f from you", request.RequesterID, float64(r.amountCents)/100),
+			LinkView: "activity",
+		})
+	}
+
+	return nil
+}
+
+// FulfillPaymentRequest atomically pays a pending payment request: transfers funds from
+// the payer to the requester, records the payment and wallet transactions, and marks the
+// request as completed — all in a single flat transaction (no nested calls to Pay).
+func (s *Store) FulfillPaymentRequest(requestID, payerID string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("request fulfillment aborted: failed to open transaction context: %w", err)
+	}
+	defer tx.Rollback()
+
+	var requesterID string
+	var amountCents int
+	var status string
+	err = tx.QueryRow(
+		`SELECT requester_id, amount_cents, status FROM payment_requests WHERE id = ? AND payer_id = ?;`,
+		requestID, payerID,
+	).Scan(&requesterID, &amountCents, &status)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("request fulfillment rejected: request ID '%s' not found or does not belong to payer '%s'", requestID, payerID)
+		}
+		return fmt.Errorf("request fulfillment failed: unable to validate payment request: %w", err)
+	}
+	if status != "pending" {
+		return fmt.Errorf("request fulfillment rejected: request '%s' is not pending (current status: %s)", requestID, status)
+	}
+
+	var balance int
+	if err = tx.QueryRow(`SELECT balance_cents FROM users WHERE id = ?;`, payerID).Scan(&balance); err != nil {
+		return fmt.Errorf("request fulfillment failed: unable to verify payer balance: %w", err)
+	}
+	if balance < amountCents {
+		return fmt.Errorf("request fulfillment rejected: insufficient liquid funds (balance: %d cents, required: %d cents)", balance, amountCents)
+	}
+
+	if _, err = tx.Exec(`UPDATE users SET balance_cents = balance_cents - ? WHERE id = ?;`, amountCents, payerID); err != nil {
+		return fmt.Errorf("request fulfillment failed: unable to deduct balance from payer '%s': %w", payerID, err)
+	}
+	if _, err = tx.Exec(`UPDATE users SET balance_cents = balance_cents + ? WHERE id = ?;`, amountCents, requesterID); err != nil {
+		return fmt.Errorf("request fulfillment failed: unable to credit balance to requester '%s': %w", requesterID, err)
+	}
+
+	paymentID := create_new_ID()
+	if _, err = tx.Exec(
+		`INSERT INTO payments (id, sender_id, receiver_id, amount_cents, total_amount_cents, note, payment_type, total_installments, status) VALUES (?, ?, ?, ?, ?, '', 'direct', 1, 'completed');`,
+		paymentID, payerID, requesterID, amountCents, amountCents,
+	); err != nil {
+		return fmt.Errorf("request fulfillment failed: unable to record payment: %w", err)
+	}
+
+	if _, err = tx.Exec(
+		`INSERT INTO wallet_transactions (id, user_id, amount_cents, transaction_type) VALUES (?, ?, ?, 'withdrawal');`,
+		create_new_ID(), payerID, amountCents,
+	); err != nil {
+		return fmt.Errorf("request fulfillment failed: unable to record withdrawal for payer '%s': %w", payerID, err)
+	}
+	if _, err = tx.Exec(
+		`INSERT INTO wallet_transactions (id, user_id, amount_cents, transaction_type) VALUES (?, ?, ?, 'deposit');`,
+		create_new_ID(), requesterID, amountCents,
+	); err != nil {
+		return fmt.Errorf("request fulfillment failed: unable to record deposit for requester '%s': %w", requesterID, err)
+	}
+
+	if _, err = tx.Exec(`UPDATE payment_requests SET status = 'completed' WHERE id = ?;`, requestID); err != nil {
+		return fmt.Errorf("request fulfillment failed: unable to mark request '%s' as completed: %w", requestID, err)
+	}
+
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("request fulfillment failed: transaction commit rejected: %w", err)
+	}
+
+	go s.CreateNotification(&models.Notification{
+		UserID:   requesterID,
+		Type:     "payment_received",
+		Title:    "Payment received",
+		Body:     fmt.Sprintf("@%s paid your $%.2f request", payerID, float64(amountCents)/100),
+		LinkView: "activity",
+	})
+
+	return nil
+}
+
+// GetUnifiedActivity returns a single chronologically ordered feed combining payments
+// sent, payments received, requests sent, and requests received for a user.
+func (s *Store) GetUnifiedActivity(userID string, limit int) ([]models.ActivityItem, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+
+	query := `
+	SELECT kind, id, peer_id, peer_name, amount_cents, note, status, created_at FROM (
+	  SELECT 'payment_sent' AS kind, p.id, p.receiver_id AS peer_id,
+	         COALESCE(NULLIF(u.name,''), p.receiver_id) AS peer_name,
+	         p.amount_cents, COALESCE(p.note,'') AS note, p.status, p.created_at
+	  FROM payments p LEFT JOIN users u ON u.id = p.receiver_id
+	  WHERE p.sender_id = ? AND p.payment_type NOT IN ('bnpl','group_split')
+
+	  UNION ALL
+
+	  SELECT 'payment_received', p.id, p.sender_id,
+	         COALESCE(NULLIF(u.name,''), p.sender_id),
+	         p.amount_cents, COALESCE(p.note,''), p.status, p.created_at
+	  FROM payments p LEFT JOIN users u ON u.id = p.sender_id
+	  WHERE p.receiver_id = ? AND p.payment_type NOT IN ('bnpl','group_split')
+
+	  UNION ALL
+
+	  SELECT 'request_sent', pr.id, pr.payer_id,
+	         COALESCE(NULLIF(u.name,''), pr.payer_id),
+	         pr.amount_cents, COALESCE(pr.note,''), pr.status, pr.created_at
+	  FROM payment_requests pr LEFT JOIN users u ON u.id = pr.payer_id
+	  WHERE pr.requester_id = ?
+
+	  UNION ALL
+
+	  SELECT 'request_received', pr.id, pr.requester_id,
+	         COALESCE(NULLIF(u.name,''), pr.requester_id),
+	         pr.amount_cents, COALESCE(pr.note,''), pr.status, pr.created_at
+	  FROM payment_requests pr LEFT JOIN users u ON u.id = pr.requester_id
+	  WHERE pr.payer_id = ?
+	)
+	ORDER BY created_at DESC
+	LIMIT ?;`
+
+	rows, err := s.db.Query(query, userID, userID, userID, userID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute unified activity query for user '%s': %w", userID, err)
+	}
+	defer rows.Close()
+
+	items := []models.ActivityItem{}
+	for rows.Next() {
+		var item models.ActivityItem
+		if err = rows.Scan(
+			&item.Kind, &item.ID, &item.PeerID, &item.PeerName,
+			&item.AmountCents, &item.Note, &item.Status, &item.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan activity item: %w", err)
+		}
+		items = append(items, item)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("cursor error during unified activity fetch for user '%s': %w", userID, err)
+	}
+
+	return items, nil
 }

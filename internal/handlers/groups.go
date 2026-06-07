@@ -43,7 +43,7 @@ func (h *Handler) CreateGroup(w http.ResponseWriter, r *http.Request) {
 	// Pass the populated struct down to the database engine
 	err = h.store.CreateGroup(&input)
 	if err != nil {
-		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": friendlyError(err)})
 		return
 	}
 
@@ -68,7 +68,7 @@ func (h *Handler) ListGroups(w http.ResponseWriter, r *http.Request) {
 	// Query the database engine for all groups this user belongs to
 	groups, err := h.store.ListGroups(userID)
 	if err != nil {
-		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": friendlyError(err)})
 		return
 	}
 
@@ -100,7 +100,7 @@ func (h *Handler) ListGroupMembers(w http.ResponseWriter, r *http.Request) {
 	// Query the database engine for the member roster of this group
 	members, err := h.store.ListGroupMembers(groupID)
 	if err != nil {
-		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": friendlyError(err)})
 		return
 	}
 
@@ -145,7 +145,7 @@ func (h *Handler) SendGroupInvitation(w http.ResponseWriter, r *http.Request) {
 	// Pass the session-verified sender identity and client-supplied routing details to the store
 	err = h.store.SendGroupInvitation(input.GroupID, senderID, input.ReceiverID)
 	if err != nil {
-		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": friendlyError(err)})
 		return
 	}
 
@@ -183,7 +183,7 @@ func (h *Handler) AcceptGroupInvitation(w http.ResponseWriter, r *http.Request) 
 	// callerID is verified by the session; groupID is resolved inside the store from the database
 	err = h.store.AcceptGroupInvitation(input.InvitationID, callerID)
 	if err != nil {
-		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": friendlyError(err)})
 		return
 	}
 
@@ -221,7 +221,7 @@ func (h *Handler) DeclineGroupInvitation(w http.ResponseWriter, r *http.Request)
 	// callerID is session-bound; the store's WHERE receiver_id = ? ensures the caller owns the invitation
 	err = h.store.DeclineGroupInvitation(input.InvitationID, callerID)
 	if err != nil {
-		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": friendlyError(err)})
 		return
 	}
 
@@ -246,7 +246,7 @@ func (h *Handler) ListIncomingGroupInvitations(w http.ResponseWriter, r *http.Re
 	// Query the database engine for this user's pending incoming group invitations
 	invitations, err := h.store.ListIncomingGroupInvitations(receiverID)
 	if err != nil {
-		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": friendlyError(err)})
 		return
 	}
 
@@ -271,7 +271,7 @@ func (h *Handler) ListOutgoingGroupInvitations(w http.ResponseWriter, r *http.Re
 	// Query the database engine for all group invitations this user has sent
 	invitations, err := h.store.ListOutgoingGroupInvitations(senderID)
 	if err != nil {
-		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": friendlyError(err)})
 		return
 	}
 
@@ -316,12 +316,40 @@ func (h *Handler) RemoveGroupMember(w http.ResponseWriter, r *http.Request) {
 	// Pass the group and target IDs to the store — the store enforces the rows-affected guard
 	err = h.store.RemoveGroupMember(input.GroupID, input.TargetUserID)
 	if err != nil {
-		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": friendlyError(err)})
 		return
 	}
 
 	// Return a successful acknowledgement with the submitted payload
 	WriteJSON(w, http.StatusOK, input)
+}
+
+// ListGroupActivity returns all payments where both sender and receiver are members of the
+// specified group, providing the activity log for the group detail view.
+func (h *Handler) ListGroupActivity(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only GET requests are permitted on this route"})
+		return
+	}
+
+	_, authorized := h.authenticateSession(w, r)
+	if !authorized {
+		return
+	}
+
+	groupID := r.URL.Query().Get("group_id")
+	if groupID == "" {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Missing required URL query parameter: 'group_id'"})
+		return
+	}
+
+	payments, err := h.store.ListGroupActivity(groupID)
+	if err != nil {
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": friendlyError(err)})
+		return
+	}
+
+	WriteJSON(w, http.StatusOK, payments)
 }
 
 // LeaveGroup removes the authenticated user from a group's membership roster voluntarily.
@@ -354,7 +382,7 @@ func (h *Handler) LeaveGroup(w http.ResponseWriter, r *http.Request) {
 	// Pass the session-verified user identity and the target group ID down to the storage layer
 	err = h.store.LeaveGroup(input.GroupID, userID)
 	if err != nil {
-		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": friendlyError(err)})
 		return
 	}
 

@@ -36,6 +36,10 @@ func NewFromPath(path string) (*Store, error) {
 		return nil, fmt.Errorf("failed to open database path '%s': %w", path, err)
 	}
 
+	// SQLite is single-writer; one connection prevents "database is locked" errors
+	// and ensures in-memory databases are shared across all callers.
+	db.SetMaxOpenConns(1)
+
 	s := &Store{db: db}
 
 	// Automate table generation schema rules execution
@@ -44,6 +48,23 @@ func NewFromPath(path string) (*Store, error) {
 		db.Close() // Clean up the connection if table creation fails
 		return nil, fmt.Errorf("database initialization failed during custom path schema setup: %w", err)
 	}
+
+	// Idempotent migration: adds profile_color to databases created before the column existed.
+	// SQLite returns "duplicate column name" on re-run; we intentionally ignore that error.
+	s.db.Exec(`ALTER TABLE users ADD COLUMN profile_color TEXT NOT NULL DEFAULT 'av-indigo';`)
+
+	// Seed the virtual treasury account used as counterparty in BNPL fund flows.
+	// INSERT OR IGNORE is idempotent — safe on every restart and on existing databases.
+	// is_active=0 keeps it invisible in all user-facing list queries.
+	s.db.Exec(`
+INSERT OR IGNORE INTO users
+  (id, password_hash, name, email, phone_number,
+   balance_cents, credit_score, credit_limit_cents,
+   is_active, profile_color)
+VALUES
+  ('app_treasury','NO_LOGIN','App Treasury','','',
+   9999999999, 0, 0, 0, 'av-indigo');
+`)
 
 	return s, nil
 }
@@ -62,6 +83,7 @@ func (s *Store) createTables() error {
 		credit_score INTEGER NOT NULL DEFAULT 50,
 		credit_limit_cents INTEGER NOT NULL DEFAULT 100000,
 		is_active INTEGER NOT NULL DEFAULT 1,
+		profile_color TEXT NOT NULL DEFAULT 'av-indigo',
 		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 	);`
 
@@ -225,28 +247,10 @@ func (s *Store) createTables() error {
 	query = `
 	CREATE TABLE IF NOT EXISTS user_settings (
     	user_id TEXT PRIMARY KEY,
-    	theme TEXT NOT NULL DEFAULT 'light',
-    	email_notifications INTEGER NOT NULL DEFAULT 1, -- 1 = true
-    	is_discoverable INTEGER NOT NULL DEFAULT 1, -- 1 = true
+    	email_notifications INTEGER NOT NULL DEFAULT 1,
+    	is_discoverable INTEGER NOT NULL DEFAULT 1,
     	updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     	FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
-	);`
-
-	_, err = s.db.Exec(query)
-	if err != nil {
-		return err
-	}
-
-	query = `
-	CREATE TABLE IF NOT EXISTS linked_cards (
-		id TEXT PRIMARY KEY,
-		user_id TEXT NOT NULL,
-		token_ref TEXT NOT NULL,
-		last4 TEXT NOT NULL,
-		brand TEXT NOT NULL,
-		is_default INTEGER NOT NULL DEFAULT 0,
-		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-		FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
 	);`
 
 	_, err = s.db.Exec(query)

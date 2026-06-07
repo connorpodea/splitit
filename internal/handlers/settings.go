@@ -1,30 +1,61 @@
 package handlers
 
-import "net/http"
+import (
+	"encoding/json"
+	"net/http"
 
-// CreateLinkedCard registers a new external funding card instrument to the
-// authenticated user's account using a tokenized provider reference.
-func (h *Handler) CreateLinkedCard(w http.ResponseWriter, r *http.Request) {}
+	"github.com/connorpodea/splitit/internal/models"
+)
 
-// DeleteLinkedCard removes a linked card from the authenticated user's account.
-func (h *Handler) DeleteLinkedCard(w http.ResponseWriter, r *http.Request) {}
+// GetUserSettings returns the preference and privacy configuration for the authenticated user.
+// Returns a default settings struct if no row exists yet for this user.
+func (h *Handler) GetUserSettings(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only GET requests are permitted on this route"})
+		return
+	}
+	userID, authorized := h.authenticateSession(w, r)
+	if !authorized {
+		return
+	}
 
-// ListLinkedCards returns all external funding instruments registered to the
-// authenticated user's account.
-func (h *Handler) ListLinkedCards(w http.ResponseWriter, r *http.Request) {}
+	settings, err := h.store.GetUserSettings(userID)
+	if err != nil {
+		WriteJSON(w, http.StatusOK, models.UserSettings{
+			UserID:             userID,
+			EmailNotifications: true,
+			IsDiscoverable:     true,
+		})
+		return
+	}
 
-// GetLinkedCard returns a single linked card record by card identifier,
-// scoped to the authenticated user.
-func (h *Handler) GetLinkedCard(w http.ResponseWriter, r *http.Request) {}
+	WriteJSON(w, http.StatusOK, settings)
+}
 
-// SetDefaultCard designates a specific linked card as the principal funding
-// source for the authenticated user.
-func (h *Handler) SetDefaultCard(w http.ResponseWriter, r *http.Request) {}
+// UpdateUserSettings persists updated preference and privacy settings for the authenticated user
+// via a conflict-safe upsert operation.
+func (h *Handler) UpdateUserSettings(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only POST requests are permitted on this route"})
+		return
+	}
+	userID, authorized := h.authenticateSession(w, r)
+	if !authorized {
+		return
+	}
 
-// GetUserSettings returns the preference and privacy configuration metadata
-// for the authenticated user.
-func (h *Handler) GetUserSettings(w http.ResponseWriter, r *http.Request) {}
+	var settings models.UserSettings
+	if err := json.NewDecoder(r.Body).Decode(&settings); err != nil {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON request payload"})
+		return
+	}
 
-// UpdateUserSettings persists updated preference and privacy settings for the
-// authenticated user via an upsert operation.
-func (h *Handler) UpdateUserSettings(w http.ResponseWriter, r *http.Request) {}
+	settings.UserID = userID
+
+	if err := h.store.UpsertUserSettings(&settings); err != nil {
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": friendlyError(err)})
+		return
+	}
+
+	WriteJSON(w, http.StatusOK, map[string]bool{"success": true})
+}
