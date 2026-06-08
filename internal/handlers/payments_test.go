@@ -300,7 +300,7 @@ func TestUpdateProfileColor_PersistsColor(t *testing.T) {
 
 	rr := httptest.NewRecorder()
 	h.UpdateProfileColor(rr, sessionReq(t, http.MethodPost, "/users/update/color",
-		`{"color":"av-rose"}`, "alice"))
+		`{"color":"#fb7185"}`, "alice"))
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
@@ -310,7 +310,7 @@ func TestUpdateProfileColor_PersistsColor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetUser: %v", err)
 	}
-	if user.ProfileColor != "av-rose" {
-		t.Errorf("profile_color: want 'av-rose', got %q", user.ProfileColor)
+	if user.ProfileColor != "#fb7185" {
+		t.Errorf("profile_color: want '#fb7185', got %q", user.ProfileColor)
 	}
 }

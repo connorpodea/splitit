@@ -249,16 +249,17 @@ func viewFriends(friends []models.Profile, friendRequests []models.FriendRequest
 		if len(friendRequests) > 1 {
 			plural = "s"
 		}
+		hexPalette := []string{"#4ade80", "#22d3ee", "#fb7185", "#facc15", "#c084fc", "#db2777"}
 		rows := ""
 		for i, req := range friendRequests {
-			cls := avatarClass(i)
+			hex := hexPalette[i%len(hexPalette)]
 			ini := strings.ToUpper(req.SenderID)
 			if len([]rune(ini)) > 2 {
 				ini = string([]rune(ini)[:2])
 			}
 			rows += `
       <div style="display:flex;align-items:center;gap:12px;padding:12px 14px;border-bottom:1px solid var(--border-soft);" data-req-row="` + req.ID + `">
-        <div class="row-avatar ` + cls + `">` + ini + `</div>
+        <div class="row-avatar" style="background:` + hex + `;color:#fff">` + ini + `</div>
         <div style="flex:1;min-width:0;">
           <div style="font-size:14px;font-weight:600;color:var(--text);">@` + req.SenderID + `</div>
           <div style="font-size:12px;color:var(--text-faint);">Wants to be friends</div>
@@ -325,9 +326,13 @@ func viewFriends(friends []models.Profile, friendRequests []models.FriendRequest
 
 // friendsRows renders the list of individual friend row HTML elements for the social view.
 func friendsRows(friends []models.Profile) string {
+	hexPalette := []string{"#4ade80", "#22d3ee", "#fb7185", "#facc15", "#c084fc", "#db2777"}
 	out := ""
 	for i, f := range friends {
-		cls := avatarClass(i)
+		hex := f.ProfileColor
+		if hex == "" {
+			hex = hexPalette[i%len(hexPalette)]
+		}
 		dname := profileDisplayName(&f)
 		ini := initials(dname)
 		if ini == "?" {
@@ -342,7 +347,7 @@ func friendsRows(friends []models.Profile) string {
 		safeDname := strings.ReplaceAll(dname, "'", "")
 		out += `
     <div class="friend-row" data-name="` + searchKey + `" data-friend-id="` + f.ID + `">
-      <div class="row-avatar ` + cls + `">` + ini + `</div>
+      <div class="row-avatar" style="background:` + hex + `;color:#fff">` + ini + `</div>
       <div class="row-body" style="flex:1; min-width:0;">
         <b>` + dname + `</b>
         <div>@` + f.ID + `</div>

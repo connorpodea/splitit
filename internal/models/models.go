@@ -153,6 +153,16 @@ type CreditScoreLog struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// InstallmentDetail extends Installment with the counterparty and memo from the parent payment
+// record. Used wherever installment rows must display peer information alongside the amount.
+type InstallmentDetail struct {
+	Installment
+	PeerID    string `json:"peer_id"`
+	PeerName  string `json:"peer_name"`
+	PeerColor string `json:"peer_color"`
+	Note      string `json:"note"`
+}
+
 // InstallmentSummary provides a consolidated snapshot of a user's installment plan portfolio.
 type InstallmentSummary struct {
 	TotalSettledCents     int `json:"total_settled_cents"`
@@ -170,14 +180,17 @@ type WalletTransaction struct {
 	CreatedAt       string `json:"created_at"`
 }
 
-// ActivityItem is a unified feed entry combining payments sent/received and requests made/received.
+// ActivityItem is a unified feed entry combining payments sent/received, requests made/received,
+// and pending BNPL installments.
 type ActivityItem struct {
-	Kind        string `json:"kind"`         // "payment_sent"|"payment_received"|"request_sent"|"request_received"
+	Kind        string `json:"kind"`                   // "payment_sent"|"payment_received"|"request_sent"|"request_received"|"installment_due"
 	ID          string `json:"id"`
 	PeerID      string `json:"peer_id"`
 	PeerName    string `json:"peer_name"`
+	PeerColor   string `json:"peer_color"`             // live profile_color of the peer at query time — never stale
 	AmountCents int    `json:"amount_cents"`
 	Note        string `json:"note"`
 	Status      string `json:"status"`
 	CreatedAt   string `json:"created_at"`
+	PaymentID   string `json:"payment_id,omitempty"` // set only for installment_due; required by payInstallment()
 }

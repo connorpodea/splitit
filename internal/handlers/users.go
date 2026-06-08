@@ -25,7 +25,8 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	type RegistrationInput struct {
 		ID          string `json:"id"`
 		Password    string `json:"password"`
-		Name        string `json:"name"`
+		FirstName   string `json:"first_name"`
+		LastName    string `json:"last_name"`
 		Email       string `json:"email"`
 		PhoneNumber string `json:"phone_number"`
 	}
@@ -38,9 +39,26 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	input.ID = strings.ToLower(strings.TrimSpace(input.ID))
-	input.Name = strings.ToLower(strings.TrimSpace(input.Name))
 	if !regexp.MustCompile(`^[a-z0-9_]+$`).MatchString(input.ID) {
 		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Username may only contain letters, numbers, and underscores"})
+		return
+	}
+
+	firstName := strings.TrimSpace(input.FirstName)
+	lastName := strings.TrimSpace(input.LastName)
+	if firstName == "" || lastName == "" {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "First name and last name are required"})
+		return
+	}
+	combinedName := firstName + " " + lastName
+
+	if !regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`).MatchString(input.Email) {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Please enter a valid email address"})
+		return
+	}
+	phoneDigits := regexp.MustCompile(`\D`).ReplaceAllString(input.PhoneNumber, "")
+	if len(phoneDigits) != 10 {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Phone number must be exactly 10 digits"})
 		return
 	}
 
@@ -55,9 +73,9 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	new_user := models.User{
 		ID:               input.ID,
 		PasswordHash:     string(hashedPassword),
-		Name:             input.Name,
+		Name:             combinedName,
 		Email:            input.Email,
-		PhoneNumber:      input.PhoneNumber,
+		PhoneNumber:      phoneDigits,
 		BalanceCents:     0,
 		CreditScore:      50,
 		CreditLimitCents: 100000,
@@ -417,10 +435,14 @@ func registerHTML() string {
             var f = document.getElementById('reg-fname').value.trim();
             var l = document.getElementById('reg-lname').value.trim();
             if (!f || !l) { event.preventDefault(); showErr('Please enter your first and last name.'); return; }
-            document.getElementById('reg-fullname').value = f + ' ' + l;
+
+            var emailVal = document.querySelector('[name=email]').value.trim();
+            if (!/^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$/.test(emailVal)) { event.preventDefault(); showErr('Please enter a valid email address.'); return; }
 
             var phoneEl = document.querySelector('[name=phone_number]');
-            if (phoneEl) phoneEl.value = phoneEl.value.replace(/\D/g, '');
+            var digits = (phoneEl ? phoneEl.value : '').replace(/\D/g, '');
+            if (digits.length !== 10) { event.preventDefault(); showErr('Phone number must be exactly 10 digits.'); return; }
+            if (phoneEl) phoneEl.value = digits;
 
             var pw  = document.getElementById('reg-pw').value;
             var cpw = document.getElementById('reg-cpw').value;
@@ -442,7 +464,6 @@ func registerHTML() string {
             }
           "
           style="display:flex; flex-direction:column; gap:14px;">
-      <input type="hidden" name="name" id="reg-fullname" />
       <div>
         <label class="lbl">User ID</label>
         <input class="inp-plain" type="text" name="id" id="reg-uid" placeholder="your_handle" required autocomplete="username"
@@ -454,8 +475,8 @@ func registerHTML() string {
                " />
         <div id="uid-hint" style="display:none; color:#f87171; font-size:12px; margin-top:5px; font-weight:500;">Only letters, numbers, and _ are allowed</div>
       </div>
-      <div><label class="lbl">First name</label><input class="inp-plain" type="text" id="reg-fname" placeholder="First" autocomplete="given-name" /></div>
-      <div><label class="lbl">Last name</label><input class="inp-plain" type="text" id="reg-lname" placeholder="Last" autocomplete="family-name" /></div>
+      <div><label class="lbl">First name</label><input class="inp-plain" type="text" name="first_name" id="reg-fname" placeholder="First" autocomplete="given-name" /></div>
+      <div><label class="lbl">Last name</label><input class="inp-plain" type="text" name="last_name" id="reg-lname" placeholder="Last" autocomplete="family-name" /></div>
       <div><label class="lbl">Email</label><input class="inp-plain" type="email" name="email" placeholder="you@email.com" required autocomplete="email" /></div>
       <div><label class="lbl">Phone</label><input class="inp-plain" type="tel" name="phone_number" placeholder="123-456-7890" autocomplete="tel" /></div>
       <div><label class="lbl">Password</label><input class="inp-plain" type="password" id="reg-pw" name="password" placeholder="Min 8 characters" autocomplete="new-password" /></div>
@@ -476,7 +497,7 @@ func registerHTML() string {
 
 // viewProfile renders the profile section HTML, displaying the user's Splitit Score, credit limit,
 // balance stats, and navigation menu.
-func viewProfile(user *models.User, avatar, name, handle, email, phone string, friends []models.Profile, installments []models.Installment, groups []models.Group) string {
+func viewProfile(user *models.User, avatar, name, handle, email, phone string, friends []models.Profile, installments []models.InstallmentDetail, groups []models.Group) string {
 	score := user.CreditScore
 	scoreLabel := creditScoreLabel(score)
 	scoreWidth := fmt.Sprintf("%d%%", score)
@@ -512,13 +533,13 @@ func viewProfile(user *models.User, avatar, name, handle, email, phone string, f
 
 	avatarColor := user.ProfileColor
 	if avatarColor == "" {
-		avatarColor = "av-indigo"
+		avatarColor = "#4ade80"
 	}
 
 	return `
 <section class="view" data-view="profile">
   <div class="profile-hero">
-    <div class="avatar-xl ` + avatarColor + `">` + avatar + `</div>
+    <div class="avatar-xl" style="background:` + avatarColor + `;color:#fff">` + avatar + `</div>
     <div class="profile-name">` + name + `</div>
     <div class="profile-handle">@` + handle + `</div>
     <div class="profile-email">` + email + `</div>
@@ -693,6 +714,10 @@ func (h *Handler) UpdateEmail(w http.ResponseWriter, r *http.Request) {
 		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Missing required field: value"})
 		return
 	}
+	if !regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`).MatchString(input.Value) {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Please enter a valid email address"})
+		return
+	}
 	if err := h.store.UpdateEmail(userID, input.Value); err != nil {
 		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": friendlyError(err)})
 		return
@@ -720,7 +745,12 @@ func (h *Handler) UpdatePhoneNumber(w http.ResponseWriter, r *http.Request) {
 		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Missing required field: value"})
 		return
 	}
-	if err := h.store.UpdatePhoneNumber(userID, input.Value); err != nil {
+	digits := regexp.MustCompile(`\D`).ReplaceAllString(input.Value, "")
+	if len(digits) != 10 {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Phone number must be exactly 10 digits"})
+		return
+	}
+	if err := h.store.UpdatePhoneNumber(userID, digits); err != nil {
 		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": friendlyError(err)})
 		return
 	}
@@ -773,6 +803,14 @@ func (h *Handler) UpdateProfileColor(w http.ResponseWriter, r *http.Request) {
 		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Missing required field: color"})
 		return
 	}
+	validHex := map[string]bool{
+		"#4ade80": true, "#22d3ee": true, "#fb7185": true, "#facc15": true,
+		"#c084fc": true, "#f97316": true, "#e11d48": true, "#db2777": true,
+	}
+	if !validHex[input.Color] {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid color selection"})
+		return
+	}
 	if err := h.store.UpdateProfileColor(userID, input.Color); err != nil {
 		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": friendlyError(err)})
 		return
@@ -810,8 +848,3 @@ func (h *Handler) DeactivateAccount(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, map[string]bool{"success": true})
 }
 
-// avatarClass returns a CSS colour class for an avatar element by cycling through a fixed palette.
-func avatarClass(i int) string {
-	classes := []string{"av-indigo", "av-amber", "av-emerald", "av-violet", "av-cyan", "av-pink"}
-	return classes[i%len(classes)]
-}

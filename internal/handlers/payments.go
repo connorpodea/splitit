@@ -375,19 +375,19 @@ func friendPickerHTML(pickerID string, friends []models.Profile) string {
 	if len(friends) == 0 {
 		return `<div class="fp-empty">Add friends to get started.</div>`
 	}
-	fallbackColors := []string{"av-indigo", "av-amber", "av-emerald", "av-violet", "av-cyan", "av-pink"}
+	fallbackColors := []string{"#4ade80", "#22d3ee", "#fb7185", "#facc15", "#c084fc", "#db2777"}
 	out := ""
 	for i, f := range friends {
 		dname := profileDisplayName(&f)
 		ini := initials(dname)
-		cls := f.ProfileColor
-		if cls == "" {
-			cls = fallbackColors[i%len(fallbackColors)]
+		hex := f.ProfileColor
+		if hex == "" {
+			hex = fallbackColors[i%len(fallbackColors)]
 		}
 		safeID := strings.ReplaceAll(f.ID, "'", "")
 		safeName := strings.ReplaceAll(dname, "'", "")
 		out += `<div class="fp-item" data-id="` + f.ID + `" onclick="pickFriend('` + pickerID + `','` + safeID + `','` + safeName + `')" title="` + dname + `">` +
-			`<div class="fp-avatar-sm ` + cls + `">` + ini + `</div>` +
+			`<div class="fp-avatar-sm" style="background:` + hex + `;color:#fff">` + ini + `</div>` +
 			`<div class="fp-name">` + safeName + `</div>` +
 			`</div>`
 	}
@@ -400,7 +400,7 @@ func groupFriendPickerHTML(pickerID string, groups []models.Group) string {
 	if len(groups) == 0 {
 		return `<div class="fp-empty">No groups yet.</div>`
 	}
-	colors := []string{"av-indigo", "av-violet", "av-cyan", "av-emerald", "av-amber", "av-pink"}
+	hexColors := []string{"#c084fc", "#22d3ee", "#4ade80", "#facc15", "#fb7185", "#db2777"}
 	out := ""
 	for i, g := range groups {
 		ini := ""
@@ -410,11 +410,11 @@ func groupFriendPickerHTML(pickerID string, groups []models.Group) string {
 		} else if len(runes) == 1 {
 			ini = strings.ToUpper(string(runes[0]))
 		}
-		cls := colors[i%len(colors)]
+		hex := hexColors[i%len(hexColors)]
 		safeGID := strings.ReplaceAll(g.ID, "'", "")
 		safeName := strings.ReplaceAll(g.Name, "'", "")
 		out += `<div class="fp-item" data-id="` + g.ID + `" onclick="pickFriend('` + pickerID + `','` + safeGID + `','` + safeName + `')" title="` + safeName + `">` +
-			`<div class="fp-avatar-sm ` + cls + `">` + ini + `</div>` +
+			`<div class="fp-avatar-sm" style="background:` + hex + `;color:#fff">` + ini + `</div>` +
 			`<div class="fp-name">` + safeName + `</div>` +
 			`</div>`
 	}
@@ -427,12 +427,10 @@ func groupPickerSectionHTML(pickerID string, groups []models.Group) string {
 	if len(groups) == 0 {
 		return ""
 	}
-	colors := []string{"av-indigo", "av-violet", "av-cyan", "av-emerald", "av-amber", "av-pink"}
+	hexColors := []string{"#c084fc", "#22d3ee", "#4ade80", "#facc15", "#fb7185", "#db2777"}
 	rows := ""
 	for i, g := range groups {
-		cls := avatarClass(i)
-		_ = cls
-		colorCls := colors[i%len(colors)]
+		hex := hexColors[i%len(hexColors)]
 		ini := ""
 		runes := []rune(g.Name)
 		if len(runes) >= 2 {
@@ -443,7 +441,7 @@ func groupPickerSectionHTML(pickerID string, groups []models.Group) string {
 		safeGID := strings.ReplaceAll(g.ID, "'", "")
 		safeName := strings.ReplaceAll(g.Name, "'", "")
 		rows += `<div class="gp-group-row" onclick="toggleGroupMembers('` + pickerID + `','` + safeGID + `','` + safeName + `',this)">` +
-			`<div class="fp-avatar-sm ` + colorCls + `">` + ini + `</div>` +
+			`<div class="fp-avatar-sm" style="background:` + hex + `;color:#fff">` + ini + `</div>` +
 			`<div class="fp-name">` + safeName + `</div>` +
 			`<svg class="gp-chev" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>` +
 			`</div>` +

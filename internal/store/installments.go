@@ -445,6 +445,87 @@ func (s *Store) ListOverdueInstallments(userID string) ([]models.Installment, er
 	return installments, nil
 }
 
+// ListInstallmentDetailsForUser retrieves the full installment schedule for a user with live
+// counterparty name, profile color, and note resolved via JOIN at query time.
+func (s *Store) ListInstallmentDetailsForUser(userID string) ([]models.InstallmentDetail, error) {
+	query := `
+	SELECT i.id, i.payment_id, i.user_id, i.amount_cents, i.due_date, i.is_paid, i.created_at,
+	       p.receiver_id,
+	       COALESCE(NULLIF(u.name,''), p.receiver_id),
+	       COALESCE(NULLIF(u.profile_color,''), '#4ade80'),
+	       COALESCE(p.note, '')
+	FROM installments i
+	JOIN payments p ON p.id = i.payment_id
+	LEFT JOIN users u ON u.id = p.receiver_id
+	WHERE i.user_id = ?
+	ORDER BY i.due_date ASC;`
+
+	rows, err := s.db.Query(query, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve installment details for user ID '%s': %w", userID, err)
+	}
+	defer rows.Close()
+
+	details := []models.InstallmentDetail{}
+	for rows.Next() {
+		var d models.InstallmentDetail
+		var isPaidInt int
+		if err = rows.Scan(
+			&d.ID, &d.PaymentID, &d.UserWithDebt, &d.AmountCents, &d.DueDate, &isPaidInt, &d.CreatedAt,
+			&d.PeerID, &d.PeerName, &d.PeerColor, &d.Note,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan installment detail row: %w", err)
+		}
+		d.IsPaid = isPaidInt == 1
+		details = append(details, d)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("cursor error during installment details iteration for user ID '%s': %w", userID, err)
+	}
+	return details, nil
+}
+
+// ListOverdueInstallmentDetailsForUser retrieves unpaid installments past their due date with
+// live counterparty name, profile color, and note resolved via JOIN at query time.
+func (s *Store) ListOverdueInstallmentDetailsForUser(userID string) ([]models.InstallmentDetail, error) {
+	query := `
+	SELECT i.id, i.payment_id, i.user_id, i.amount_cents, i.due_date, i.is_paid, i.created_at,
+	       p.receiver_id,
+	       COALESCE(NULLIF(u.name,''), p.receiver_id),
+	       COALESCE(NULLIF(u.profile_color,''), '#4ade80'),
+	       COALESCE(p.note, '')
+	FROM installments i
+	JOIN payments p ON p.id = i.payment_id
+	LEFT JOIN users u ON u.id = p.receiver_id
+	WHERE i.user_id = ? AND i.is_paid = 0 AND i.due_date < ?
+	ORDER BY i.due_date ASC;`
+
+	today := time.Now().Format("2006-01-02")
+	rows, err := s.db.Query(query, userID, today)
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve overdue installment details for user ID '%s': %w", userID, err)
+	}
+	defer rows.Close()
+
+	details := []models.InstallmentDetail{}
+	for rows.Next() {
+		var d models.InstallmentDetail
+		var isPaidInt int
+		if err = rows.Scan(
+			&d.ID, &d.PaymentID, &d.UserWithDebt, &d.AmountCents, &d.DueDate, &isPaidInt, &d.CreatedAt,
+			&d.PeerID, &d.PeerName, &d.PeerColor, &d.Note,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan overdue installment detail row: %w", err)
+		}
+		d.IsPaid = isPaidInt == 1
+		details = append(details, d)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("cursor error during overdue installment details iteration for user ID '%s': %w", userID, err)
+	}
+	return details, nil
+}
+
 // GetPaymentWithInstallments fetches a master payment record alongside its full installment
 // schedule in a single composite response.
 func (s *Store) GetPaymentWithInstallments(paymentID string) (*models.PaymentWithInstallments, error) {

@@ -97,11 +97,11 @@ func viewNotifications(notifications []models.Notification) string {
 		"group_invitation": `<svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`,
 	}
 	typeColor := map[string]string{
-		"friend_request":   "av-indigo",
-		"friend_accepted":  "av-emerald",
-		"payment_received": "av-emerald",
-		"payment_request":  "av-amber",
-		"group_invitation": "av-violet",
+		"friend_request":   "#c084fc",
+		"friend_accepted":  "#4ade80",
+		"payment_received": "#4ade80",
+		"payment_request":  "#facc15",
+		"group_invitation": "#c084fc",
 	}
 
 	rows := ""
@@ -110,9 +110,9 @@ func viewNotifications(notifications []models.Notification) string {
 		if icon == "" {
 			icon = typeIcon["payment_request"]
 		}
-		cls := typeColor[n.Type]
-		if cls == "" {
-			cls = "av-indigo"
+		hex := typeColor[n.Type]
+		if hex == "" {
+			hex = "#c084fc"
 		}
 		date := n.CreatedAt
 		if len(date) >= 10 {
@@ -120,7 +120,7 @@ func viewNotifications(notifications []models.Notification) string {
 		}
 		rows += `
     <div class="row" style="cursor:pointer;" onclick="dismissNotif('` + n.ID + `','` + n.LinkView + `',this)">
-      <div class="row-avatar ` + cls + `">` + icon + `</div>
+      <div class="row-avatar" style="background:` + hex + `;color:#fff">` + icon + `</div>
       <div class="row-body">
         <div class="row-title"><b>` + n.Title + `</b></div>
         <div class="row-sub">` + n.Body + `</div>

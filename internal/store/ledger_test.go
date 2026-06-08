@@ -254,6 +254,105 @@ func TestGetUnifiedActivity_RespectsLimit(t *testing.T) {
 	}
 }
 
+// --- GetUnifiedActivity: installment_due branch ---
+
+func TestGetUnifiedActivity_ContainsInstallmentDue(t *testing.T) {
+	s := newTestStore(t)
+	seedUser(t, s, "alice", 50000)
+	seedUser(t, s, "merchant", 0)
+
+	loan := &models.Payment{
+		SenderID:          "alice",
+		ReceiverID:        "merchant",
+		AmountCents:       10000,
+		TotalAmountCents:  10000,
+		Note:              "sofa",
+		TotalInstallments: 4,
+		Status:            "pending",
+	}
+	if err := s.CreateBNPLLoan(loan); err != nil {
+		t.Fatalf("CreateBNPLLoan: %v", err)
+	}
+
+	items, err := s.GetUnifiedActivity("alice", 50)
+	if err != nil {
+		t.Fatalf("GetUnifiedActivity: %v", err)
+	}
+
+	var found bool
+	for _, item := range items {
+		if item.Kind == "installment_due" {
+			found = true
+			if item.PaymentID == "" {
+				t.Error("installment_due item must carry non-empty payment_id")
+			}
+			if item.AmountCents <= 0 {
+				t.Errorf("installment_due amount_cents should be positive, got %d", item.AmountCents)
+			}
+			if item.PeerName == "" && item.PeerID == "" {
+				t.Error("installment_due item must carry merchant peer_id or peer_name")
+			}
+		}
+	}
+	if !found {
+		t.Error("expected at least one 'installment_due' item in alice's activity feed after BNPL loan creation")
+	}
+}
+
+func TestGetUnifiedActivity_ExcludesPaidInstallments(t *testing.T) {
+	s := newTestStore(t)
+	seedUser(t, s, "alice", 50000)
+	seedUser(t, s, "merchant", 0)
+
+	loan := &models.Payment{
+		SenderID:          "alice",
+		ReceiverID:        "merchant",
+		AmountCents:       10000,
+		TotalAmountCents:  10000,
+		TotalInstallments: 2,
+		Status:            "pending",
+	}
+	if err := s.CreateBNPLLoan(loan); err != nil {
+		t.Fatalf("CreateBNPLLoan: %v", err)
+	}
+
+	// Get unpaid installments directly
+	installments, err := s.ListInstallments("alice")
+	if err != nil {
+		t.Fatalf("ListInstallments: %v", err)
+	}
+	var unpaid []models.Installment
+	for _, i := range installments {
+		if !i.IsPaid {
+			unpaid = append(unpaid, i)
+		}
+	}
+	if len(unpaid) == 0 {
+		t.Fatal("expected at least one unpaid installment after loan creation")
+	}
+
+	// Pay one installment
+	target := unpaid[0]
+	if err := s.PayInstallment(target.ID, target.PaymentID, "alice", target.AmountCents); err != nil {
+		t.Fatalf("PayInstallment: %v", err)
+	}
+
+	// Fetch the feed and count installment_due entries
+	before, _ := s.GetUnifiedActivity("alice", 50)
+	var dueBefore int
+	for _, item := range before {
+		if item.Kind == "installment_due" {
+			dueBefore++
+		}
+	}
+
+	// dueBefore must equal len(unpaid) - 1 since we paid one
+	expected := len(unpaid) - 1
+	if dueBefore != expected {
+		t.Errorf("after paying one installment: want %d installment_due items, got %d", expected, dueBefore)
+	}
+}
+
 // --- BNPL loan creation ---
 
 func TestCreateBNPLLoan_FundsReceiverAndGeneratesInstallments(t *testing.T) {
@@ -323,7 +422,7 @@ func TestUpdateProfileColor_PersistsColor(t *testing.T) {
 	s := newTestStore(t)
 	seedUser(t, s, "alice", 0)
 
-	if err := s.UpdateProfileColor("alice", "av-rose"); err != nil {
+	if err := s.UpdateProfileColor("alice", "#fb7185"); err != nil {
 		t.Fatalf("UpdateProfileColor: %v", err)
 	}
 
@@ -331,14 +430,14 @@ func TestUpdateProfileColor_PersistsColor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetUser: %v", err)
 	}
-	if user.ProfileColor != "av-rose" {
-		t.Errorf("profile_color: want 'av-rose', got %q", user.ProfileColor)
+	if user.ProfileColor != "#fb7185" {
+		t.Errorf("profile_color: want '#fb7185', got %q", user.ProfileColor)
 	}
 }
 
 func TestUpdateProfileColor_RejectsUnknownUser(t *testing.T) {
 	s := newTestStore(t)
-	if err := s.UpdateProfileColor("ghost", "av-rose"); err == nil {
+	if err := s.UpdateProfileColor("ghost", "#fb7185"); err == nil {
 		t.Fatal("expected error for unknown user, got nil")
 	}
 }

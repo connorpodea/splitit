@@ -389,6 +389,38 @@ func (s *Store) ListGroupActivity(groupID string) ([]models.Payment, error) {
 	return payments, nil
 }
 
+// GetGroupMemberCounts returns the member count for every group the user belongs to,
+// resolved in a single subquery to avoid N+1 scans per group.
+func (s *Store) GetGroupMemberCounts(userID string) (map[string]int, error) {
+	query := `
+	SELECT gm.group_id, COUNT(*) AS member_count
+	FROM group_members gm
+	WHERE gm.group_id IN (
+		SELECT group_id FROM group_members WHERE member_id = ?
+	)
+	GROUP BY gm.group_id;`
+
+	rows, err := s.db.Query(query, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query member count index for user ID '%s': %w", userID, err)
+	}
+	defer rows.Close()
+
+	counts := map[string]int{}
+	for rows.Next() {
+		var groupID string
+		var count int
+		if err = rows.Scan(&groupID, &count); err != nil {
+			return nil, fmt.Errorf("failed to scan member count row: %w", err)
+		}
+		counts[groupID] = count
+	}
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("error during member count iteration for user ID '%s': %w", userID, err)
+	}
+	return counts, nil
+}
+
 // LeaveGroup removes the calling user from a group's membership roster voluntarily.
 func (s *Store) LeaveGroup(groupID, userID string) error {
 	query := `

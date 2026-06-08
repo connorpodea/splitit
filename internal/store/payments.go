@@ -709,17 +709,23 @@ func (s *Store) FulfillPaymentRequest(requestID, payerID string) error {
 }
 
 // GetUnifiedActivity returns a single chronologically ordered feed combining payments
-// sent, payments received, requests sent, and requests received for a user.
+// sent, payments received, requests sent, requests received, and pending BNPL installments.
 func (s *Store) GetUnifiedActivity(userID string, limit int) ([]models.ActivityItem, error) {
 	if limit <= 0 {
 		limit = 50
 	}
 
+	// Every branch must emit 10 columns in the same order:
+	//   kind, id, peer_id, peer_name, peer_color, amount_cents, payment_id, note, status, created_at
+	// peer_color is read live from users at query time so any profile update is immediately
+	// reflected in all historical entries on the next fetch — no caching layer required.
+	// payment_id is only meaningful for installment_due rows; all other branches emit ''.
 	query := `
-	SELECT kind, id, peer_id, peer_name, amount_cents, note, status, created_at FROM (
+	SELECT kind, id, peer_id, peer_name, peer_color, amount_cents, payment_id, note, status, created_at FROM (
 	  SELECT 'payment_sent' AS kind, p.id, p.receiver_id AS peer_id,
 	         COALESCE(NULLIF(u.name,''), p.receiver_id) AS peer_name,
-	         p.amount_cents, COALESCE(p.note,'') AS note, p.status, p.created_at
+	         COALESCE(NULLIF(u.profile_color,''), '#4ade80') AS peer_color,
+	         p.amount_cents, '' AS payment_id, COALESCE(p.note,'') AS note, p.status, p.created_at
 	  FROM payments p LEFT JOIN users u ON u.id = p.receiver_id
 	  WHERE p.sender_id = ? AND p.payment_type NOT IN ('bnpl','group_split')
 
@@ -727,7 +733,8 @@ func (s *Store) GetUnifiedActivity(userID string, limit int) ([]models.ActivityI
 
 	  SELECT 'payment_received', p.id, p.sender_id,
 	         COALESCE(NULLIF(u.name,''), p.sender_id),
-	         p.amount_cents, COALESCE(p.note,''), p.status, p.created_at
+	         COALESCE(NULLIF(u.profile_color,''), '#4ade80'),
+	         p.amount_cents, '', COALESCE(p.note,''), p.status, p.created_at
 	  FROM payments p LEFT JOIN users u ON u.id = p.sender_id
 	  WHERE p.receiver_id = ? AND p.payment_type NOT IN ('bnpl','group_split')
 
@@ -735,7 +742,8 @@ func (s *Store) GetUnifiedActivity(userID string, limit int) ([]models.ActivityI
 
 	  SELECT 'request_sent', pr.id, pr.payer_id,
 	         COALESCE(NULLIF(u.name,''), pr.payer_id),
-	         pr.amount_cents, COALESCE(pr.note,''), pr.status, pr.created_at
+	         COALESCE(NULLIF(u.profile_color,''), '#4ade80'),
+	         pr.amount_cents, '', COALESCE(pr.note,''), pr.status, pr.created_at
 	  FROM payment_requests pr LEFT JOIN users u ON u.id = pr.payer_id
 	  WHERE pr.requester_id = ?
 
@@ -743,14 +751,26 @@ func (s *Store) GetUnifiedActivity(userID string, limit int) ([]models.ActivityI
 
 	  SELECT 'request_received', pr.id, pr.requester_id,
 	         COALESCE(NULLIF(u.name,''), pr.requester_id),
-	         pr.amount_cents, COALESCE(pr.note,''), pr.status, pr.created_at
+	         COALESCE(NULLIF(u.profile_color,''), '#4ade80'),
+	         pr.amount_cents, '', COALESCE(pr.note,''), pr.status, pr.created_at
 	  FROM payment_requests pr LEFT JOIN users u ON u.id = pr.requester_id
 	  WHERE pr.payer_id = ?
+
+	  UNION ALL
+
+	  SELECT 'installment_due', i.id, p.receiver_id,
+	         COALESCE(NULLIF(u.name,''), p.receiver_id),
+	         COALESCE(NULLIF(u.profile_color,''), '#4ade80'),
+	         i.amount_cents, p.id AS payment_id, COALESCE(p.note,''), 'pending', i.due_date
+	  FROM installments i
+	  JOIN payments p ON p.id = i.payment_id
+	  LEFT JOIN users u ON u.id = p.receiver_id
+	  WHERE i.user_id = ? AND i.is_paid = 0
 	)
 	ORDER BY created_at DESC
 	LIMIT ?;`
 
-	rows, err := s.db.Query(query, userID, userID, userID, userID, limit)
+	rows, err := s.db.Query(query, userID, userID, userID, userID, userID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute unified activity query for user '%s': %w", userID, err)
 	}
@@ -760,8 +780,8 @@ func (s *Store) GetUnifiedActivity(userID string, limit int) ([]models.ActivityI
 	for rows.Next() {
 		var item models.ActivityItem
 		if err = rows.Scan(
-			&item.Kind, &item.ID, &item.PeerID, &item.PeerName,
-			&item.AmountCents, &item.Note, &item.Status, &item.CreatedAt,
+			&item.Kind, &item.ID, &item.PeerID, &item.PeerName, &item.PeerColor,
+			&item.AmountCents, &item.PaymentID, &item.Note, &item.Status, &item.CreatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan activity item: %w", err)
 		}

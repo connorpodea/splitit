@@ -4,9 +4,29 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/connorpodea/splitit/internal/models"
 )
+
+// walletDashboard holds pre-fetched data for the server-rendered wallet tab.
+type walletDashboard struct {
+	SentCents        int
+	RecvCents        int
+	NetCents         int
+	Utilization      float64
+	OutstandingCents int
+	OverdueCents     int
+	SettledCents     int
+	Transactions     []models.WalletTransaction
+}
+
+// analyticsDashboard holds pre-fetched data for the server-rendered analytics tab.
+type analyticsDashboard struct {
+	Recipients    []models.TopRecipient
+	Monthly       *models.MonthlySummary
+	CreditHistory []models.CreditScoreLog
+}
 
 func (h *Handler) GetInitialView(w http.ResponseWriter, r *http.Request) {
 	cookie, err := r.Cookie("session_user_id")
@@ -20,22 +40,35 @@ func (h *Handler) GetInitialView(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	friends, _ := h.store.ListFriends(user.ID)
-	installments, _ := h.store.ListInstallments(user.ID)
-	overdueInstallments, _ := h.store.ListOverdueInstallments(user.ID)
+	installments, _ := h.store.ListInstallmentDetailsForUser(user.ID)
+	overdueInstallments, _ := h.store.ListOverdueInstallmentDetailsForUser(user.ID)
 	incomingRequests, _ := h.store.ListIncomingPaymentRequests(user.ID)
 	friendRequests, _ := h.store.ListIncomingFriendRequests(user.ID)
 	notifications, _ := h.store.ListNotifications(user.ID)
 	groups, _ := h.store.ListGroups(user.ID)
 	groupInvitations, _ := h.store.ListIncomingGroupInvitations(user.ID)
+	activityFeed, _ := h.store.GetUnifiedActivity(user.ID, 50)
+	memberCounts, _ := h.store.GetGroupMemberCounts(user.ID)
+	since30d := time.Now().AddDate(0, -1, 0)
+	walletTotals, _ := h.store.GetSpendingTotals(user.ID, since30d)
+	walletUtil, _ := h.store.GetBNPLUtilization(user.ID)
+	walletSummary, _ := h.store.GetInstallmentSummary(user.ID)
+	walletTxns, _ := h.store.ListWalletTransactions(user.ID)
+	since90d := time.Now().AddDate(0, -3, 0)
+	now := time.Now()
+	analyticsRecipients, _ := h.store.GetTopRecipients(user.ID, 5, since90d)
+	analyticsMonthly, _ := h.store.GetMonthlySpendingSummary(user.ID, now.Year(), now.Month())
+	analyticsCreditHistory, _ := h.store.GetCreditScoreHistory(user.ID)
+	userSettings, _ := h.store.GetUserSettings(user.ID)
 
 	if friends == nil {
 		friends = []models.Profile{}
 	}
 	if installments == nil {
-		installments = []models.Installment{}
+		installments = []models.InstallmentDetail{}
 	}
 	if overdueInstallments == nil {
-		overdueInstallments = []models.Installment{}
+		overdueInstallments = []models.InstallmentDetail{}
 	}
 	if incomingRequests == nil {
 		incomingRequests = []models.PaymentRequest{}
@@ -52,8 +85,41 @@ func (h *Handler) GetInitialView(w http.ResponseWriter, r *http.Request) {
 	if groupInvitations == nil {
 		groupInvitations = []models.GroupInvitation{}
 	}
+	if activityFeed == nil {
+		activityFeed = []models.ActivityItem{}
+	}
+	if memberCounts == nil {
+		memberCounts = map[string]int{}
+	}
+	wDash := &walletDashboard{}
+	if walletTotals != nil {
+		wDash.SentCents = walletTotals.TotalSentCents
+		wDash.RecvCents = walletTotals.TotalReceivedCents
+		wDash.NetCents = walletTotals.NetCents
+	}
+	wDash.Utilization = walletUtil
+	if walletSummary != nil {
+		wDash.OutstandingCents = walletSummary.TotalOutstandingCents
+		wDash.OverdueCents = walletSummary.TotalOverdueCents
+		wDash.SettledCents = walletSummary.TotalSettledCents
+	}
+	if walletTxns == nil {
+		walletTxns = []models.WalletTransaction{}
+	}
+	wDash.Transactions = walletTxns
+	aDash := &analyticsDashboard{
+		Recipients:    analyticsRecipients,
+		Monthly:       analyticsMonthly,
+		CreditHistory: analyticsCreditHistory,
+	}
+	if aDash.Recipients == nil {
+		aDash.Recipients = []models.TopRecipient{}
+	}
+	if aDash.CreditHistory == nil {
+		aDash.CreditHistory = []models.CreditScoreLog{}
+	}
 
-	writeHTML(w, dashboardHTML(user, friends, installments, overdueInstallments, incomingRequests, friendRequests, notifications, groups, groupInvitations))
+	writeHTML(w, dashboardHTML(user, friends, installments, overdueInstallments, incomingRequests, friendRequests, notifications, groups, groupInvitations, activityFeed, memberCounts, wDash, aDash, userSettings))
 }
 
 func (h *Handler) GetDashboardView(w http.ResponseWriter, r *http.Request) {
@@ -68,22 +134,35 @@ func (h *Handler) GetDashboardView(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	friends, _ := h.store.ListFriends(user.ID)
-	installments, _ := h.store.ListInstallments(user.ID)
-	overdueInstallments, _ := h.store.ListOverdueInstallments(user.ID)
+	installments, _ := h.store.ListInstallmentDetailsForUser(user.ID)
+	overdueInstallments, _ := h.store.ListOverdueInstallmentDetailsForUser(user.ID)
 	incomingRequests, _ := h.store.ListIncomingPaymentRequests(user.ID)
 	friendRequests, _ := h.store.ListIncomingFriendRequests(user.ID)
 	notifications, _ := h.store.ListNotifications(user.ID)
 	groups, _ := h.store.ListGroups(user.ID)
 	groupInvitations, _ := h.store.ListIncomingGroupInvitations(user.ID)
+	activityFeed, _ := h.store.GetUnifiedActivity(user.ID, 50)
+	memberCounts, _ := h.store.GetGroupMemberCounts(user.ID)
+	since30d := time.Now().AddDate(0, -1, 0)
+	walletTotals, _ := h.store.GetSpendingTotals(user.ID, since30d)
+	walletUtil, _ := h.store.GetBNPLUtilization(user.ID)
+	walletSummary, _ := h.store.GetInstallmentSummary(user.ID)
+	walletTxns, _ := h.store.ListWalletTransactions(user.ID)
+	since90d := time.Now().AddDate(0, -3, 0)
+	now := time.Now()
+	analyticsRecipients, _ := h.store.GetTopRecipients(user.ID, 5, since90d)
+	analyticsMonthly, _ := h.store.GetMonthlySpendingSummary(user.ID, now.Year(), now.Month())
+	analyticsCreditHistory, _ := h.store.GetCreditScoreHistory(user.ID)
+	userSettings, _ := h.store.GetUserSettings(user.ID)
 
 	if friends == nil {
 		friends = []models.Profile{}
 	}
 	if installments == nil {
-		installments = []models.Installment{}
+		installments = []models.InstallmentDetail{}
 	}
 	if overdueInstallments == nil {
-		overdueInstallments = []models.Installment{}
+		overdueInstallments = []models.InstallmentDetail{}
 	}
 	if incomingRequests == nil {
 		incomingRequests = []models.PaymentRequest{}
@@ -100,13 +179,46 @@ func (h *Handler) GetDashboardView(w http.ResponseWriter, r *http.Request) {
 	if groupInvitations == nil {
 		groupInvitations = []models.GroupInvitation{}
 	}
+	if activityFeed == nil {
+		activityFeed = []models.ActivityItem{}
+	}
+	if memberCounts == nil {
+		memberCounts = map[string]int{}
+	}
+	wDash := &walletDashboard{}
+	if walletTotals != nil {
+		wDash.SentCents = walletTotals.TotalSentCents
+		wDash.RecvCents = walletTotals.TotalReceivedCents
+		wDash.NetCents = walletTotals.NetCents
+	}
+	wDash.Utilization = walletUtil
+	if walletSummary != nil {
+		wDash.OutstandingCents = walletSummary.TotalOutstandingCents
+		wDash.OverdueCents = walletSummary.TotalOverdueCents
+		wDash.SettledCents = walletSummary.TotalSettledCents
+	}
+	if walletTxns == nil {
+		walletTxns = []models.WalletTransaction{}
+	}
+	wDash.Transactions = walletTxns
+	aDash := &analyticsDashboard{
+		Recipients:    analyticsRecipients,
+		Monthly:       analyticsMonthly,
+		CreditHistory: analyticsCreditHistory,
+	}
+	if aDash.Recipients == nil {
+		aDash.Recipients = []models.TopRecipient{}
+	}
+	if aDash.CreditHistory == nil {
+		aDash.CreditHistory = []models.CreditScoreLog{}
+	}
 
-	writeHTML(w, dashboardHTML(user, friends, installments, overdueInstallments, incomingRequests, friendRequests, notifications, groups, groupInvitations))
+	writeHTML(w, dashboardHTML(user, friends, installments, overdueInstallments, incomingRequests, friendRequests, notifications, groups, groupInvitations, activityFeed, memberCounts, wDash, aDash, userSettings))
 }
 
 // ---- view: Home ---------------------------------------------------------------
 
-func viewHome(name string, user *models.User, overdueInstallments []models.Installment, installments []models.Installment, incomingRequests []models.PaymentRequest) string {
+func viewHome(name string, user *models.User, overdueInstallments []models.InstallmentDetail, installments []models.InstallmentDetail, incomingRequests []models.PaymentRequest) string {
 	firstName := strings.Fields(name)
 	greet := "there"
 	if len(firstName) > 0 {
@@ -125,11 +237,10 @@ func viewHome(name string, user *models.User, overdueInstallments []models.Insta
 	activeSplits := len(splitIDs)
 	recentRows := ""
 	count := 0
-	for i, req := range incomingRequests {
+	for _, req := range incomingRequests {
 		if count >= 5 {
 			break
 		}
-		cls := avatarClass(i)
 		ini := strings.ToUpper(req.RequesterID)
 		if len([]rune(ini)) > 2 {
 			ini = string([]rune(ini)[:2])
@@ -138,21 +249,32 @@ func viewHome(name string, user *models.User, overdueInstallments []models.Insta
 		if len(date) >= 10 {
 			date = date[:10]
 		}
-		recentRows += `<div class="row"><div class="row-avatar ` + cls + `">` + ini + `</div><div class="row-body"><div class="row-title"><b>@` + req.RequesterID + `</b> requested from <b>you</b></div><div class="row-sub">` + req.Note + `</div></div><div class="row-right"><div class="row-amt req mono">$` + fmt.Sprintf("%d.%02d", req.AmountCents/100, req.AmountCents%100) + `</div><div class="row-time">` + date + `</div></div></div>`
+		recentRows += `<div class="row"><div class="row-avatar" style="background:#4ade80;color:#fff">` + ini + `</div><div class="row-body"><div class="row-title"><b>@` + req.RequesterID + `</b> requested from <b>you</b></div><div class="row-sub">` + req.Note + `</div></div><div class="row-right"><div class="row-amt req mono">$` + fmt.Sprintf("%d.%02d", req.AmountCents/100, req.AmountCents%100) + `</div><div class="row-time">` + date + `</div></div></div>`
 		count++
 	}
-	for i, inst := range installments {
+	for _, inst := range installments {
 		if count >= 5 {
 			break
 		}
-		cls := avatarClass(i)
+		peerColor := inst.PeerColor
+		if peerColor == "" {
+			peerColor = "#4ade80"
+		}
+		peerLabel := inst.PeerName
+		if peerLabel == "" {
+			peerLabel = inst.PeerID
+		}
 		statusLabel := "Due " + inst.DueDate
 		amtClass := "bnpl"
 		if inst.IsPaid {
 			statusLabel = "Paid"
 			amtClass = "pos"
 		}
-		recentRows += `<div class="row"><div class="row-avatar ` + cls + `">BN</div><div class="row-body"><div class="row-title"><b>BNPL</b> installment <span class="pill">Pay-in-4</span></div><div class="row-sub">` + statusLabel + `</div></div><div class="row-right"><div class="row-amt ` + amtClass + ` mono">$` + fmt.Sprintf("%d.%02d", inst.AmountCents/100, inst.AmountCents%100) + `</div><div class="row-time">` + inst.DueDate + `</div></div></div>`
+		sub := statusLabel
+		if inst.Note != "" {
+			sub = inst.Note + " · " + statusLabel
+		}
+		recentRows += `<div class="row"><div class="row-avatar" style="background:` + peerColor + `;color:#fff">BN</div><div class="row-body"><div class="row-title"><b>BNPL</b> to <b>` + peerLabel + `</b> <span class="pill">Pay-in-4</span></div><div class="row-sub">` + sub + `</div></div><div class="row-right"><div class="row-amt ` + amtClass + ` mono">$` + fmt.Sprintf("%d.%02d", inst.AmountCents/100, inst.AmountCents%100) + `</div><div class="row-time">` + inst.DueDate + `</div></div></div>`
 		count++
 	}
 	if recentRows == "" {
@@ -167,7 +289,7 @@ func viewHome(name string, user *models.User, overdueInstallments []models.Insta
     <div class="hero-meta">
       <span><b>$` + fmt.Sprintf("%d.%02d", outstandingBNPLCents/100, outstandingBNPLCents%100) + `</b> outstanding</span>
       <span style="opacity:.4;">·</span>
-      <span><b>` + fmt.Sprintf("%d", activeSplits) + `</b> active splits</span>
+      <span><b>` + fmt.Sprintf("%d", activeSplits) + `</b> active BNPL</span>
     </div>
   </div>
   <div class="actions">
@@ -187,21 +309,30 @@ func viewHome(name string, user *models.User, overdueInstallments []models.Insta
 
 // ---- view: Activity -----------------------------------------------------------
 
-func viewActivity(installments []models.Installment, overdueInstallments []models.Installment, _ []models.PaymentRequest) string {
+func viewActivity(installments []models.InstallmentDetail, overdueInstallments []models.InstallmentDetail, _ []models.PaymentRequest, activityFeed []models.ActivityItem) string {
 	overdueIDs := make(map[string]bool)
 	for _, inst := range overdueInstallments {
 		overdueIDs[inst.ID] = true
 	}
 
 	activeRows := ""
-	activeIdx := 0
 	for _, inst := range installments {
 		if inst.IsPaid || overdueIDs[inst.ID] {
 			continue
 		}
-		cls := avatarClass(activeIdx)
-		activeRows += `<div class="row"><div class="row-avatar ` + cls + `">BN</div><div class="row-body"><div class="row-title"><b>BNPL installment</b> <span class="pill">Pay-in-4</span></div><div class="row-sub">Due ` + inst.DueDate + `</div><div class="progress"><span style="width:50%;"></span></div></div><div class="row-right"><div class="row-amt bnpl mono">$` + fmt.Sprintf("%d.%02d", inst.AmountCents/100, inst.AmountCents%100) + `</div><div class="row-time">/installment</div></div></div>`
-		activeIdx++
+		peerColor := inst.PeerColor
+		if peerColor == "" {
+			peerColor = "#4ade80"
+		}
+		peerLabel := inst.PeerName
+		if peerLabel == "" {
+			peerLabel = inst.PeerID
+		}
+		sub := "Due " + inst.DueDate
+		if inst.Note != "" {
+			sub = inst.Note + " · Due " + inst.DueDate
+		}
+		activeRows += `<div class="row"><div class="row-avatar" style="background:` + peerColor + `;color:#fff">BN</div><div class="row-body"><div class="row-title"><b>BNPL</b> to <b>` + peerLabel + `</b> <span class="pill">Pay-in-4</span></div><div class="row-sub">` + sub + `</div><div class="progress"><span style="width:50%;"></span></div></div><div class="row-right"><div class="row-amt bnpl mono">$` + fmt.Sprintf("%d.%02d", inst.AmountCents/100, inst.AmountCents%100) + `</div><div class="row-time">/installment</div></div></div>`
 	}
 	if activeRows == "" {
 		activeRows = `<div style="text-align:center;padding:28px 16px;color:var(--text-mute);font-size:13px;">No active BNPL plans.</div>`
@@ -221,20 +352,102 @@ func viewActivity(installments []models.Installment, overdueInstallments []model
 		}
 		overdueRows := ""
 		for _, inst := range overdueInstallments {
-			overdueRows += `<div class="row overdue-row" data-installment-id="` + inst.ID + `" data-payment-id="` + inst.PaymentID + `" data-amount-cents="` + fmt.Sprintf("%d", inst.AmountCents) + `"><div class="row-avatar av-rose">OD</div><div class="row-body"><div class="row-title"><b>BNPL installment</b> <span class="pill warn">Overdue</span></div><div class="row-sub">Due ` + inst.DueDate + `</div><div class="progress warn"><span style="width:25%;"></span></div></div><div class="row-right"><button onclick="payInstallment('` + inst.ID + `','` + inst.PaymentID + `',` + fmt.Sprintf("%d", inst.AmountCents) + `)" style="background:var(--rose);color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">Pay $` + fmt.Sprintf("%d.%02d", inst.AmountCents/100, inst.AmountCents%100) + `</button></div></div>`
+			peerColor := inst.PeerColor
+			if peerColor == "" {
+				peerColor = "#4ade80"
+			}
+			peerLabel := inst.PeerName
+			if peerLabel == "" {
+				peerLabel = inst.PeerID
+			}
+			sub := "Due " + inst.DueDate
+			if inst.Note != "" {
+				sub = inst.Note + " · Due " + inst.DueDate
+			}
+			overdueRows += `<div class="row overdue-row" data-installment-id="` + inst.ID + `" data-payment-id="` + inst.PaymentID + `" data-amount-cents="` + fmt.Sprintf("%d", inst.AmountCents) + `"><div class="row-avatar" style="background:` + peerColor + `;color:#fff">OD</div><div class="row-body"><div class="row-title"><b>BNPL</b> to <b>` + peerLabel + `</b> <span class="pill warn">Overdue</span></div><div class="row-sub">` + sub + `</div><div class="progress warn"><span style="width:25%;"></span></div></div><div class="row-right"><button onclick="payInstallment('` + inst.ID + `','` + inst.PaymentID + `',` + fmt.Sprintf("%d", inst.AmountCents) + `)" style="background:var(--rose);color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">Pay $` + fmt.Sprintf("%d.%02d", inst.AmountCents/100, inst.AmountCents%100) + `</button></div></div>`
 		}
 		overdueContent = `<div class="overdue-banner"><svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg><div class="ob-text"><strong>$` + fmt.Sprintf("%d.%02d", overdueTotalCents/100, overdueTotalCents%100) + ` overdue across ` + fmt.Sprintf("%d", len(overdueInstallments)) + ` bills</strong><div>Late fees may apply. Pay now to keep your Splitit Score intact.</div></div><button onclick="payAllOverdue()">Pay all</button></div><div class="card">` + overdueRows + `</div>`
 	}
 
+	feedRows := ""
+	for _, item := range activityFeed {
+		amt := fmt.Sprintf("%d.%02d", item.AmountCents/100, item.AmountCents%100)
+		peerName := item.PeerName
+		if peerName == "" {
+			peerName = item.PeerID
+		}
+		if peerName == "" {
+			peerName = "?"
+		}
+		ini := initials(peerName)
+		if ini == "" {
+			ini = "?"
+		}
+		avColor := item.PeerColor
+		if avColor == "" {
+			avColor = "#4ade80"
+		}
+		date := item.CreatedAt
+		if len(date) > 16 {
+			date = date[:16]
+		}
+		date = strings.ReplaceAll(date, "T", " ")
+		var amtCls, prefix, title, extra string
+		switch item.Kind {
+		case "payment_sent":
+			amtCls, prefix = "neg", "−"
+			title = "You paid <b>" + peerName + "</b>"
+		case "payment_received":
+			amtCls, prefix = "pos", "+"
+			title = "<b>" + peerName + "</b> paid you"
+		case "request_sent":
+			amtCls, prefix = "req", ""
+			title = "You requested from <b>" + peerName + "</b>"
+		case "request_received":
+			amtCls, prefix = "req", ""
+			title = "<b>" + peerName + "</b> requested"
+			if item.Status == "pending" {
+				extra = `<button onclick="payRequest('` + item.ID + `')" style="background:var(--indigo);color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;margin-bottom:4px;">Pay It</button>`
+			}
+		case "installment_due":
+			amtCls, prefix = "bnpl", ""
+			title = "BNPL to <b>" + peerName + "</b>"
+			extra = `<button onclick="payInstallment('` + item.ID + `','` + item.PaymentID + `',` + fmt.Sprintf("%d", item.AmountCents) + `)" style="background:var(--indigo);color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;margin-bottom:4px;">Pay Off</button>`
+		default:
+			amtCls, prefix, title = "", "", item.Kind
+		}
+		amtStr := "$" + amt
+		if prefix != "" {
+			amtStr = prefix + amtStr
+		}
+		statusSuffix := ""
+		if item.Status != "" && item.Status != "completed" {
+			statusSuffix = " · " + item.Status
+		}
+		var sub string
+		if item.Note == "" {
+			sub = item.Status + " · " + date
+		} else {
+			sub = item.Note + statusSuffix + " · " + date
+		}
+		feedRows += `<div class="row"><div class="row-avatar" style="background:` + avColor + `;color:#fff">` + ini + `</div><div class="row-body"><div class="row-title">` + title + `</div><div class="row-sub">` + sub + `</div></div><div class="row-right">` + extra + `<div class="row-amt ` + amtCls + ` mono">` + amtStr + `</div></div></div>`
+	}
+	var feedContent string
+	if feedRows == "" {
+		feedContent = `<div style="text-align:center;padding:28px 16px;color:var(--text-mute);font-size:13px;">No activity yet.</div>`
+	} else {
+		feedContent = `<div class="card">` + feedRows + `</div>`
+	}
+
 	return `
-<section class="view" data-view="activity" data-onload="loadUnifiedActivity">
+<section class="view" data-view="activity">
   <div class="section-row" style="margin-top:0;"><h2 style="font-size:22px;font-weight:800;letter-spacing:-0.02em;">Activity</h2></div>
   <div class="subtabs" role="tablist">
     <button class="subtab active" data-pane="all" onclick="goPane(this)">Feed</button>
     <button class="subtab" data-pane="active" onclick="goPane(this)">Active Installments</button>
     <button class="subtab" data-pane="overdue" onclick="goPane(this)">Overdue Installments` + overdueSubtabBadge + `</button>
   </div>
-  <div data-pane-content="all" class="pane-content"><div id="unified-feed"><div style="text-align:center;padding:28px 16px;color:var(--text-mute);font-size:13px;">Loading activity…</div></div></div>
+  <div data-pane-content="all" class="pane-content"><div id="unified-feed">` + feedContent + `</div></div>
   <div data-pane-content="active" class="pane-content" style="display:none;"><div class="card">` + activeRows + `</div></div>
   <div data-pane-content="overdue" class="pane-content" style="display:none;">` + overdueContent + `</div>
 </section>`
@@ -242,7 +455,7 @@ func viewActivity(installments []models.Installment, overdueInstallments []model
 
 // ---- view: Groups -------------------------------------------------------------
 
-func viewGroups(groups []models.Group, groupInvitations []models.GroupInvitation, userID string) string {
+func viewGroups(groups []models.Group, groupInvitations []models.GroupInvitation, userID string, memberCounts map[string]int) string {
 	// Pending invitations — shown as an action surface so users arriving from the
 	// Notification Center can accept or decline without a separate page.
 	invitesSection := ""
@@ -254,7 +467,7 @@ func viewGroups(groups []models.Group, groupInvitations []models.GroupInvitation
 				date = date[:10]
 			}
 			rows += `<div style="display:flex;align-items:center;gap:12px;padding:12px 14px;border-bottom:1px solid var(--border-soft);" data-invite-id="` + inv.ID + `">
-        <div class="row-avatar av-violet"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></div>
+        <div class="row-avatar" style="background:var(--surface-3);color:var(--text-dim)"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></div>
         <div style="flex:1;min-width:0;">
           <div style="font-size:14px;font-weight:600;color:var(--text);">Group invitation</div>
           <div style="font-size:12px;color:var(--text-faint);">from @` + inv.SenderID + ` · ` + date + `</div>
@@ -272,9 +485,10 @@ func viewGroups(groups []models.Group, groupInvitations []models.GroupInvitation
 	if len(groups) == 0 {
 		groupsContent = `<div class="empty"><div class="empty-icon"><svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></div><div class="empty-title">No groups yet</div><div class="empty-sub">Create a group to split bills and manage shared expenses with multiple people.</div><button onclick="openSheet('create-group')">Create your first group</button></div>`
 	} else {
+		hexPalette := []string{"#c084fc", "#22d3ee", "#4ade80", "#facc15", "#fb7185", "#db2777"}
 		rows := ""
 		for i, g := range groups {
-			cls := avatarClass(i)
+			hex := hexPalette[i%len(hexPalette)]
 			ini := ""
 			runes := []rune(g.Name)
 			if len(runes) >= 2 {
@@ -287,11 +501,16 @@ func viewGroups(groups []models.Group, groupInvitations []models.GroupInvitation
 			if isCreator {
 				creatorTag = ` <span style="font-size:10px;background:var(--indigo-soft);color:var(--indigo-hi);padding:2px 6px;border-radius:4px;font-weight:700;">CREATOR</span>`
 			}
+			count := memberCounts[g.ID]
+			memberText := fmt.Sprintf("%d member", count)
+			if count != 1 {
+				memberText += "s"
+			}
 			rows += `<div class="group-row" data-group-id="` + g.ID + `">
-        <div class="row-avatar ` + cls + `">` + ini + `</div>
+        <div class="row-avatar" style="background:` + hex + `;color:#fff">` + ini + `</div>
         <div class="row-body" style="flex:1;min-width:0;cursor:pointer;" onclick="goGroupDetail('` + g.ID + `','` + strings.ReplaceAll(g.Name, "'", "") + `')">
           <div class="row-title"><b>` + g.Name + `</b>` + creatorTag + `</div>
-          <div class="row-sub" id="gmembers-` + g.ID + `">Loading…</div>
+          <div class="row-sub" id="gmembers-` + g.ID + `">` + memberText + `</div>
         </div>
         <div class="friend-actions">
           <button title="Invite member" onclick="openInviteSheet('` + g.ID + `','` + strings.ReplaceAll(g.Name, "'", "") + `')">
@@ -307,7 +526,7 @@ func viewGroups(groups []models.Group, groupInvitations []models.GroupInvitation
 	}
 
 	return `
-<section class="view" data-view="groups" data-onload="loadGroupsData">
+<section class="view" data-view="groups">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
     <h2 style="font-size:22px;font-weight:800;letter-spacing:-0.02em;margin:0;">Groups</h2>
     <button class="friend-add" onclick="openSheet('create-group')">
@@ -320,13 +539,81 @@ func viewGroups(groups []models.Group, groupInvitations []models.GroupInvitation
 </section>`
 }
 
-// ---- view: Wallet (lazy-loaded) -----------------------------------------------
+// ---- view: Wallet -------------------------------------------------------------
 
-func viewWallet(user *models.User) string {
+func viewWallet(user *models.User, w *walletDashboard) string {
 	balanceWhole := user.BalanceCents / 100
 	balanceFrac := user.BalanceCents % 100
+
+	utilPct := int(w.Utilization * 100)
+	if utilPct > 100 {
+		utilPct = 100
+	}
+	var utilColor string
+	if utilPct >= 80 {
+		utilColor = "var(--rose-hi)"
+	} else if utilPct >= 50 {
+		utilColor = "var(--amber-hi)"
+	} else {
+		utilColor = "var(--emerald-hi)"
+	}
+	netColor := "var(--emerald-hi)"
+	netPfx := "+"
+	netAbs := w.NetCents
+	if netAbs < 0 {
+		netColor = "var(--rose-hi)"
+		netPfx = "−"
+		netAbs = -netAbs
+	}
+
+	statsHTML := `<div class="stat-grid" style="margin:0 0 16px;">` +
+		`<div class="stat-tile"><div class="stat-lbl">Sent (Last 30d)</div><div class="stat-val mono" style="color:var(--rose-hi);">$` + fmt.Sprintf("%d", w.SentCents/100) + `</div></div>` +
+		`<div class="stat-tile"><div class="stat-lbl">Received (Last 30d)</div><div class="stat-val green mono">$` + fmt.Sprintf("%d", w.RecvCents/100) + `</div></div>` +
+		`<div class="stat-tile"><div class="stat-lbl">Net (Last 30d)</div><div class="stat-val mono" style="color:` + netColor + `;">` + netPfx + `$` + fmt.Sprintf("%d", netAbs/100) + `</div></div>` +
+		`</div>` +
+		`<div class="card" style="padding:16px;margin-bottom:16px;">` +
+		`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">` +
+		`<div style="font-size:13px;font-weight:700;color:var(--text-mute);text-transform:uppercase;letter-spacing:.05em;">BNPL Utilization</div>` +
+		`<div class="mono" style="font-size:15px;font-weight:700;color:` + utilColor + `;">` + fmt.Sprintf("%d", utilPct) + `%</div>` +
+		`</div>` +
+		`<div class="progress"><span style="width:` + fmt.Sprintf("%d", utilPct) + `%;background:` + utilColor + `;"></span></div>` +
+		`<div style="display:flex;justify-content:space-between;margin-top:8px;font-size:11px;color:var(--text-faint);">` +
+		`<span>$` + fmt.Sprintf("%d", w.OutstandingCents/100) + ` outstanding</span>` +
+		`<span>$` + fmt.Sprintf("%d", w.OverdueCents/100) + ` overdue</span>` +
+		`<span>$` + fmt.Sprintf("%d", w.SettledCents/100) + ` settled</span>` +
+		`</div></div>`
+
+	var txnsHTML string
+	if len(w.Transactions) == 0 {
+		txnsHTML = `<div style="text-align:center;padding:24px;color:var(--text-mute);font-size:13px;">No wallet transactions yet.</div>`
+	} else {
+		txnRows := ""
+		for i, t := range w.Transactions {
+			if i >= 30 {
+				break
+			}
+			isDeposit := t.TransactionType == "deposit"
+			var amtCls, dc, dl, pfx, lbl, arrow string
+			if isDeposit {
+				amtCls, dc, dl, pfx, lbl, arrow = "pos", "dir-in", "IN", "+", "Deposit", "↓"
+			} else {
+				amtCls, dc, dl, pfx, lbl, arrow = "neg", "dir-out", "OUT", "−", "Withdrawal", "↑"
+			}
+			date := t.CreatedAt
+			if len(date) > 10 {
+				date = date[:10]
+			}
+			txnRows += `<div class="row">` +
+				`<div class="row-avatar" style="background:var(--surface-3);color:var(--text-dim);font-size:16px;">` + arrow + `</div>` +
+				`<div class="row-body"><div class="row-title"><b>` + lbl + `</b><span class="dir-badge ` + dc + `">` + dl + `</span></div>` +
+				`<div class="row-sub">` + date + `</div></div>` +
+				`<div class="row-right"><div class="row-amt ` + amtCls + ` mono">` + pfx + `$` + fmt.Sprintf("%d.%02d", t.AmountCents/100, t.AmountCents%100) + `</div></div></div>`
+		}
+		txnsHTML = `<div class="card">` + txnRows + `</div>`
+	}
+
 	return `
-<section class="view" data-view="wallet" data-onload="loadWalletData">
+<section class="view" data-view="wallet">
   <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">
     <button class="gd-back-btn" onclick="goView('profile')" aria-label="Back to profile">
       <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg>
@@ -347,54 +634,137 @@ func viewWallet(user *models.User) string {
       </button>
     </div>
   </div>
-  <div id="wallet-stats"><div style="color:var(--text-mute);font-size:13px;padding:12px 0;text-align:center;">Loading stats…</div></div>
+  <div id="wallet-stats">` + statsHTML + `</div>
   <div class="section-row"><h2>Transaction history</h2></div>
-  <div id="wallet-txns"><div style="color:var(--text-mute);font-size:13px;padding:12px 0;text-align:center;">Loading…</div></div>
+  <div id="wallet-txns">` + txnsHTML + `</div>
 </section>`
 }
 
-// ---- view: Analytics (lazy-loaded) -------------------------------------------
+// ---- view: Analytics ----------------------------------------------------------
 
-func viewAnalytics() string {
+func viewAnalytics(a *analyticsDashboard) string {
+	hexPalette := []string{"#4ade80", "#22d3ee", "#fb7185", "#facc15", "#c084fc", "#f97316", "#e11d48", "#db2777"}
+
+	rHTML := `<div class="section-row" style="margin-top:0;"><h2>Top Recipients (Last 90d)</h2></div>`
+	if len(a.Recipients) == 0 {
+		rHTML += `<div style="color:var(--text-mute);font-size:13px;padding:12px 0;">No payment data yet.</div>`
+	} else {
+		rows := ""
+		for i, r := range a.Recipients {
+			dn := r.Profile.Name
+			if dn == "" {
+				dn = r.Profile.ID
+			}
+			if dn == "" {
+				dn = "?"
+			}
+			ini := initials(dn)
+			avColor := r.Profile.ProfileColor
+			if avColor == "" {
+				avColor = hexPalette[i%len(hexPalette)]
+			}
+			rows += `<div class="row"><div class="row-avatar" style="background:` + avColor + `;color:#fff">` + ini + `</div>` +
+				`<div class="row-body"><div class="row-title"><b>` + dn + `</b></div><div class="row-sub">@` + r.Profile.ID + `</div></div>` +
+				`<div class="row-right"><div class="row-amt neg mono">−$` + fmt.Sprintf("%d", r.TotalSentCents/100) + `</div><div class="row-time">sent</div></div></div>`
+		}
+		rHTML += `<div class="card">` + rows + `</div>`
+	}
+
+	sentCents, recvCents, bnplCents := 0, 0, 0
+	if a.Monthly != nil {
+		sentCents = a.Monthly.TotalOutCents
+		recvCents = a.Monthly.TotalInCents
+		bnplCents = a.Monthly.ActiveBNPLChargesCents
+	}
+	mHTML := `<div class="section-row"><h2>This Month</h2></div>` +
+		`<div class="stat-grid" style="margin-bottom:16px;">` +
+		`<div class="stat-tile"><div class="stat-lbl">Sent</div><div class="stat-val mono" style="color:var(--rose-hi);">$` + fmt.Sprintf("%d", sentCents/100) + `</div></div>` +
+		`<div class="stat-tile"><div class="stat-lbl">Received</div><div class="stat-val green mono">$` + fmt.Sprintf("%d", recvCents/100) + `</div></div>` +
+		`<div class="stat-tile"><div class="stat-lbl">BNPL</div><div class="stat-val indigo mono">$` + fmt.Sprintf("%d", bnplCents/100) + `</div></div>` +
+		`</div>`
+
+	cHTML := `<div class="section-row"><h2>Credit Score History</h2></div>`
+	if len(a.CreditHistory) == 0 {
+		cHTML += `<div style="color:var(--text-mute);font-size:13px;padding:12px 0;">No score history yet.</div>`
+	} else {
+		rows := ""
+		for i, e := range a.CreditHistory {
+			if i >= 12 {
+				break
+			}
+			isPos := e.Delta >= 0
+			date := e.CreatedAt.Format("2006-01-02")
+			var avStyle, amtCls, deltaStr, arrow string
+			if isPos {
+				avStyle = "background:var(--emerald-soft);color:var(--emerald-hi);font-size:14px;"
+				amtCls = "pos"
+				deltaStr = "+" + fmt.Sprintf("%d", e.Delta)
+				arrow = "▲"
+			} else {
+				avStyle = "background:var(--rose-soft);color:var(--rose-hi);font-size:14px;"
+				amtCls = "neg"
+				deltaStr = fmt.Sprintf("%d", e.Delta)
+				arrow = "▼"
+			}
+			rows += `<div class="row">` +
+				`<div class="row-avatar" style="` + avStyle + `">` + arrow + `</div>` +
+				`<div class="row-body"><div class="row-title"><b>Score adjustment</b></div><div class="row-sub">New score: ` + fmt.Sprintf("%d", e.Score) + `</div></div>` +
+				`<div class="row-right"><div class="row-amt ` + amtCls + ` mono">` + deltaStr + `</div><div class="row-time">` + date + `</div></div></div>`
+		}
+		cHTML += `<div class="card">` + rows + `</div>`
+	}
+
 	return `
-<section class="view" data-view="analytics" data-onload="loadAnalyticsData">
+<section class="view" data-view="analytics">
   <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">
     <button class="gd-back-btn" onclick="goView('profile')" aria-label="Back to profile">
       <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg>
     </button>
     <div style="font-size:22px;font-weight:800;letter-spacing:-0.02em;">Analytics</div>
   </div>
-  <div id="analytics-content"><div style="color:var(--text-mute);font-size:13px;padding:24px 0;text-align:center;">Loading analytics…</div></div>
+  <div id="analytics-content">` + rHTML + mHTML + cHTML + `</div>
 </section>`
 }
 
-// ---- view: Settings (lazy-loaded for cards + privacy toggles) -----------------
+// ---- view: Settings -----------------------------------------------------------
 
-func viewSettings(user *models.User) string {
+func viewSettings(user *models.User, settings *models.UserSettings) string {
 	name := displayName(user)
 	email := user.Email
 	phone := user.PhoneNumber
 
 	profileColor := user.ProfileColor
 	if profileColor == "" {
-		profileColor = "av-indigo"
+		profileColor = "#4ade80"
 	}
-	type colorEntry struct{ cls, label string }
+	type colorEntry struct{ hex, label string }
 	palette := []colorEntry{
-		{"av-indigo", "Indigo"}, {"av-amber", "Amber"}, {"av-emerald", "Emerald"},
-		{"av-violet", "Violet"}, {"av-cyan", "Cyan"}, {"av-rose", "Rose"}, {"av-pink", "Pink"},
+		{"#4ade80", "Mint Green"}, {"#22d3ee", "Electric Cyan"}, {"#fb7185", "Soft Coral"},
+		{"#facc15", "Mustard Gold"}, {"#c084fc", "Bright Lavender"}, {"#f97316", "Tangerine"},
+		{"#e11d48", "Crimson"}, {"#db2777", "Magenta"},
 	}
 	swatches := ""
 	for _, c := range palette {
 		ring := ""
-		if c.cls == profileColor {
-			ring = "box-shadow:0 0 0 3px var(--surface),0 0 0 5px currentColor;"
+		if c.hex == profileColor {
+			ring = "box-shadow:0 0 0 3px var(--surface),0 0 0 5px " + c.hex + ";"
 		}
-		swatches += `<button class="color-swatch ` + c.cls + `" data-color="` + c.cls + `" onclick="submitUpdateColor('` + c.cls + `')" style="width:32px;height:32px;border-radius:50%;border:none;cursor:pointer;transition:transform .15s;` + ring + `" title="` + c.label + `"></button>`
+		swatches += `<button class="color-swatch" data-color="` + c.hex + `" onclick="submitUpdateColor('` + c.hex + `')" style="width:32px;height:32px;border-radius:50%;border:none;cursor:pointer;transition:transform .15s;background:` + c.hex + `;` + ring + `" title="` + c.label + `"></button>`
+	}
+
+	emailChecked := "checked"
+	discChecked := "checked"
+	if settings != nil {
+		if !settings.EmailNotifications {
+			emailChecked = ""
+		}
+		if !settings.IsDiscoverable {
+			discChecked = ""
+		}
 	}
 
 	return `
-<section class="view" data-view="settings" data-onload="loadSettingsData">
+<section class="view" data-view="settings">
   <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">
     <button class="gd-back-btn" onclick="goView('profile')" aria-label="Back to profile">
       <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg>
@@ -447,11 +817,11 @@ func viewSettings(user *models.User) string {
   <div class="card" id="privacy-card" style="margin-bottom:16px;">
     <div class="toggle-row">
       <div><div class="toggle-label">Email notifications</div><div class="toggle-sub">Receive payment and activity alerts by email</div></div>
-      <label class="toggle-switch"><input type="checkbox" id="toggle-email-notif" checked onchange="submitUpdateSettings()"><span class="toggle-slider"></span></label>
+      <label class="toggle-switch"><input type="checkbox" id="toggle-email-notif" ` + emailChecked + ` onchange="submitUpdateSettings()"><span class="toggle-slider"></span></label>
     </div>
     <div class="toggle-row">
       <div><div class="toggle-label">Discoverable</div><div class="toggle-sub">Allow others to find your account by name or ID</div></div>
-      <label class="toggle-switch"><input type="checkbox" id="toggle-discoverable" checked onchange="submitUpdateSettings()"><span class="toggle-slider"></span></label>
+      <label class="toggle-switch"><input type="checkbox" id="toggle-discoverable" ` + discChecked + ` onchange="submitUpdateSettings()"><span class="toggle-slider"></span></label>
     </div>
   </div>
 
@@ -628,7 +998,7 @@ func dashboardStyles() string {
   .icon-btn { position: relative; width: 38px; height: 38px; border-radius: 50%; background: var(--surface-2); border: 1px solid var(--border); color: var(--text-dim); cursor: pointer; display: flex; align-items: center; justify-content: center; transition: background .15s, color .15s; }
   .icon-btn:hover { background: var(--surface-3); color: var(--text); }
   .icon-btn .dot { position: absolute; top: 9px; right: 10px; width: 7px; height: 7px; border-radius: 50%; background: var(--emerald-hi); border: 2px solid var(--surface-2); }
-  .avatar-btn { width: 38px; height: 38px; border-radius: 50%; background: linear-gradient(135deg, var(--indigo) 0%, #4f46e5 100%); border: 2px solid #312e81; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; color: #fff; font-family: inherit; transition: transform .15s; }
+  .avatar-btn { width: 38px; height: 38px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.15); cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; color: #fff; font-family: inherit; transition: transform .15s; }
   .avatar-btn:hover { transform: scale(1.06); }
 
   /* ---- Layout ---- */
@@ -689,20 +1059,11 @@ func dashboardStyles() string {
   .row-sub { font-size:12px; color:var(--text-faint); margin-top:2px; }
   .row-right { text-align:right; flex-shrink:0; }
   .row-amt { font-size:15px; font-weight:700; letter-spacing:-.01em; }
-  .row-amt.pos { color:var(--emerald-hi); }
-  .row-amt.neg { color:var(--text); }
-  .row-amt.req { color:var(--amber-hi); }
+  .row-amt.pos  { color:var(--emerald-hi); }
+  .row-amt.neg  { color:var(--rose-hi); }
+  .row-amt.req  { color:var(--amber-hi); }
   .row-amt.bnpl { color:var(--indigo-hi); }
   .row-time { color:var(--text-faint); font-size:11px; margin-top:2px; }
-
-  /* ---- Avatar palette ---- */
-  .av-indigo  { background:var(--indigo-soft); color:var(--indigo-hi); }
-  .av-amber   { background:#1c0a00; color:var(--amber-hi); }
-  .av-emerald { background:var(--emerald-soft); color:var(--emerald-hi); }
-  .av-rose    { background:var(--rose-soft); color:var(--rose-hi); }
-  .av-violet  { background:#1a0533; color:#c084fc; }
-  .av-cyan    { background:#042f2e; color:#5eead4; }
-  .av-pink    { background:#4a044e; color:#f0abfc; }
 
   /* ---- Subtabs ---- */
   .subtabs { display:flex; gap:4px; background:var(--surface-2); border:1px solid var(--border); border-radius:12px; padding:4px; margin-bottom:16px; }
@@ -759,7 +1120,7 @@ func dashboardStyles() string {
 
   /* ---- Profile ---- */
   .profile-hero { background:var(--surface-2); border:1px solid var(--border); border-radius:20px; padding:24px; margin-bottom:16px; text-align:center; }
-  .avatar-xl { width:80px; height:80px; border-radius:50%; background:linear-gradient(135deg,var(--indigo) 0%,#4f46e5 100%); border:2px solid #312e81; margin:0 auto 14px; display:flex; align-items:center; justify-content:center; font-size:28px; font-weight:700; color:#fff; font-family:inherit; }
+  .avatar-xl { width:80px; height:80px; border-radius:50%; border:2px solid rgba(255,255,255,0.15); margin:0 auto 14px; display:flex; align-items:center; justify-content:center; font-size:28px; font-weight:700; color:#fff; font-family:inherit; }
   .profile-name { font-size:22px; font-weight:800; color:var(--text); letter-spacing:-.02em; }
   .profile-handle, .profile-email, .profile-phone_number { font-size:13px; color:var(--text-faint); margin-top:2px; }
   .profile-handle { color:var(--text-mute); margin-top:4px; }
@@ -981,15 +1342,6 @@ func dashboardScript() string {
     document.querySelectorAll('.tab[data-tab], .side-link[data-tab]').forEach(function(btn) {
       btn.classList.toggle('active', btn.getAttribute('data-tab') === name);
     });
-    // Trigger data-onload exactly once per section
-    var section = document.querySelector('[data-view="' + name + '"]');
-    if (section) {
-      var fn = section.getAttribute('data-onload');
-      if (fn) {
-        section.removeAttribute('data-onload');
-        if (typeof window[fn] === 'function') window[fn]();
-      }
-    }
     if (subpane && name === 'activity') {
       requestAnimationFrame(function() {
         var btn = document.querySelector('[data-pane="' + subpane + '"]');
@@ -1153,7 +1505,7 @@ func dashboardScript() string {
     // Fetch members and render
     wrap.innerHTML = '<div style="padding:6px 0;font-size:12px;color:var(--text-mute);">Loading…</div>';
     wrap.style.display = 'block';
-    var colors = ['av-indigo','av-amber','av-emerald','av-violet','av-cyan','av-pink'];
+    var hexPalette = ['#4ade80','#22d3ee','#fb7185','#facc15','#c084fc','#f97316','#e11d48','#db2777'];
     fetch('/groups/members?group_id=' + encodeURIComponent(groupID), { credentials: 'same-origin' })
       .then(function(r) { return r.json(); })
       .then(function(members) {
@@ -1162,11 +1514,11 @@ func dashboardScript() string {
         wrap.innerHTML = arr.map(function(m, i) {
           var dn  = m.name || ('@' + m.id);
           var ini = computeInitials(dn);
-          var cls = m.profile_color || colors[i % colors.length];
+          var avStyle = 'background:' + (m.profile_color || hexPalette[i % hexPalette.length]) + ';color:#fff';
           var sid = (m.id || '').replace(/'/g, '');
           var sdn = dn.replace(/'/g, '');
           return '<div class="fp-item" data-id="' + m.id + '" onclick="pickFriend(\'' + pickerID + '\',\'' + sid + '\',\'' + sdn + '\')">' +
-            '<div class="fp-avatar-sm ' + cls + '">' + ini + '</div>' +
+            '<div class="fp-avatar-sm" style="' + avStyle + '">' + ini + '</div>' +
             '<div class="fp-name">' + sdn + '</div>' +
             '</div>';
         }).join('');
@@ -1212,7 +1564,7 @@ func dashboardScript() string {
     var container = document.getElementById('addfriend-results');
     if (!_allProfiles) { initProfileSearch(); return; }
     q = (q || '').toLowerCase().trim();
-    var colors = ['av-indigo','av-amber','av-emerald','av-violet','av-cyan','av-pink'];
+    var hexPalette = ['#4ade80','#22d3ee','#fb7185','#facc15','#c084fc','#f97316','#e11d48','#db2777'];
     var matches = _allProfiles.filter(function(p) {
       if (p.id === window._selfID) return false;
       if (window._friendIDs && window._friendIDs.has(p.id)) return false;
@@ -1225,10 +1577,10 @@ func dashboardScript() string {
     container.innerHTML = matches.map(function(p, i) {
       var dn = p.name || p.id;
       var ini = computeInitials(dn);
-      var cls = p.profile_color || colors[i % colors.length];
+      var avStyle = 'background:' + (p.profile_color || hexPalette[i % hexPalette.length]) + ';color:#fff';
       var safe = dn.replace(/'/g,'');
       return '<div style="display:flex;align-items:center;gap:12px;padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:12px;">' +
-        '<div class="row-avatar ' + cls + '" style="width:36px;height:36px;font-size:12px;flex-shrink:0;">' + ini + '</div>' +
+        '<div class="row-avatar" style="' + avStyle + ';width:36px;height:36px;font-size:12px;flex-shrink:0;">' + ini + '</div>' +
         '<div style="flex:1;min-width:0;"><div style="font-size:14px;font-weight:600;color:var(--text);">' + dn + '</div><div style="font-size:12px;color:var(--text-faint);">@' + p.id + '</div></div>' +
         '<button onclick="sendFriendRequestTo(\'' + p.id + '\',\'' + safe + '\')" style="background:var(--indigo);color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;flex-shrink:0;">Add</button>' +
         '</div>';
@@ -1365,22 +1717,6 @@ func dashboardScript() string {
       });
   }
 
-  // ---- Groups ----------------------------------------------------------------
-  function loadGroupsData() {
-    document.querySelectorAll('[data-group-id]').forEach(function(row) {
-      var gid  = row.getAttribute('data-group-id');
-      var span = document.getElementById('gmembers-' + gid);
-      if (!span) return;
-      fetch('/groups/members?group_id=' + encodeURIComponent(gid), { credentials: 'same-origin' })
-        .then(function(r) { return r.json(); })
-        .then(function(members) {
-          var arr = Array.isArray(members) ? members : [];
-          span.textContent = arr.length + ' member' + (arr.length !== 1 ? 's' : '');
-        })
-        .catch(function() { span.textContent = 'Members unavailable'; });
-    });
-  }
-
   function openInviteSheet(groupID, groupName) {
     var idEl    = document.getElementById('invite-group-id');
     var titleEl = document.getElementById('invite-sheet-title');
@@ -1452,7 +1788,7 @@ func dashboardScript() string {
   }
 
   function loadGroupDetailData(groupID) {
-    var colors = ['av-indigo','av-amber','av-emerald','av-violet','av-cyan','av-rose','av-pink'];
+    var hexPalette = ['#4ade80','#22d3ee','#fb7185','#facc15','#c084fc','#f97316','#e11d48','#db2777'];
 
     // Members
     fetch('/groups/members?group_id=' + encodeURIComponent(groupID), { credentials: 'same-origin' })
@@ -1466,12 +1802,12 @@ func dashboardScript() string {
           return;
         }
         var rows = arr.map(function(m, i) {
-          var ini  = computeInitials(m.name || m.id || '?');
-          var cls  = m.profile_color || colors[i % colors.length];
-          var date = m.created_at ? m.created_at.slice(0, 10) : '';
-          var dn   = m.name || ('@' + m.id);
+          var ini     = computeInitials(m.name || m.id || '?');
+          var avStyle = 'background:' + (m.profile_color || hexPalette[i % hexPalette.length]) + ';color:#fff';
+          var date    = m.created_at ? m.created_at.slice(0, 10) : '';
+          var dn      = m.name || ('@' + m.id);
           return '<div class="row">' +
-            '<div class="row-avatar ' + cls + '">' + ini + '</div>' +
+            '<div class="row-avatar" style="' + avStyle + '">' + ini + '</div>' +
             '<div class="row-body"><div class="row-title"><b>' + dn + '</b></div><div class="row-sub">@' + (m.id || '') + '</div></div>' +
             '<div class="row-right"><div class="row-time">' + date + '</div></div>' +
             '</div>';
@@ -1495,21 +1831,23 @@ func dashboardScript() string {
           return;
         }
         var rows = arr.map(function(p, i) {
-          var cls   = colors[i % colors.length];
-          var sini  = p.sender_id   ? p.sender_id.slice(0, 2).toUpperCase()   : 'PA';
-          var date  = p.created_at  ? p.created_at.slice(0, 10)               : '';
-          var type  = p.payment_type === 'bnpl' ? ' <span class="pill">BNPL</span>' : '';
-          var note  = p.note || p.payment_type || '';
-          var cents = p.amount_cents || 0;
+          var avStyle = 'background:' + hexPalette[i % hexPalette.length] + ';color:#fff';
+          var sini    = p.sender_id ? p.sender_id.slice(0, 2).toUpperCase() : 'PA';
+          var date    = p.created_at ? p.created_at.slice(0, 16).replace('T',' ') : '';
+          var type    = p.payment_type === 'bnpl' ? ' <span class="pill">BNPL</span>' : '';
+          var note    = p.note || p.payment_type || '';
+          var cents   = p.amount_cents || 0;
+          var isSelf  = p.sender_id === window._selfID;
+          var amtCls  = isSelf ? 'neg' : 'pos';
+          var prefix  = isSelf ? '−' : '+';
           return '<div class="row">' +
-            '<div class="row-avatar ' + cls + '">' + sini + '</div>' +
+            '<div class="row-avatar" style="' + avStyle + '">' + sini + '</div>' +
             '<div class="row-body">' +
               '<div class="row-title"><b>@' + (p.sender_id || '') + '</b> → <b>@' + (p.receiver_id || '') + '</b>' + type + '</div>' +
-              '<div class="row-sub">' + note + '</div>' +
+              '<div class="row-sub">' + (note ? note + ' · ' : '') + date + '</div>' +
             '</div>' +
             '<div class="row-right">' +
-              '<div class="row-amt neg mono">$' + (cents / 100).toFixed(2) + '</div>' +
-              '<div class="row-time">' + date + '</div>' +
+              '<div class="row-amt ' + amtCls + ' mono">' + prefix + '$' + (cents / 100).toFixed(2) + '</div>' +
             '</div>' +
             '</div>';
         }).join('');
@@ -1518,72 +1856,6 @@ func dashboardScript() string {
       .catch(function() {
         var el = document.getElementById('group-detail-activity');
         if (el) el.innerHTML = '<div style="color:var(--rose-hi);font-size:13px;padding:20px;text-align:center;">Could not load activity.</div>';
-      });
-  }
-
-  // ---- Wallet ----------------------------------------------------------------
-  function loadWalletData() {
-    var statsEl = document.getElementById('wallet-stats');
-    var txnsEl  = document.getElementById('wallet-txns');
-    fetch('/wallet/dashboard', { credentials: 'same-origin' })
-      .then(function(r) { return r.json(); })
-      .then(function(d) {
-        var totals  = d.spending_totals     || {};
-        var util    = d.bnpl_utilization    || {};
-        var summary = d.installment_summary || {};
-        var txns    = Array.isArray(d.transactions) ? d.transactions : [];
-
-        var sentCents = totals.total_sent_cents     || 0;
-        var recvCents = totals.total_received_cents || 0;
-        var netCents  = totals.net_cents             || 0;
-        var utilPct   = Math.round((typeof util.utilization === 'number' ? util.utilization : (util||0)) * 100);
-        var utilColor = utilPct >= 80 ? 'var(--rose-hi)' : utilPct >= 50 ? 'var(--amber-hi)' : 'var(--emerald-hi)';
-        var netColor  = netCents >= 0 ? 'var(--emerald-hi)' : 'var(--rose-hi)';
-        var netPfx    = netCents >= 0 ? '+' : '−';
-
-        var statsHTML =
-          '<div class="stat-grid" style="margin:0 0 16px;">' +
-            '<div class="stat-tile"><div class="stat-lbl">Sent (Last 30d)</div><div class="stat-val mono" style="color:var(--rose-hi);">$' + (sentCents/100).toFixed(0) + '</div></div>' +
-            '<div class="stat-tile"><div class="stat-lbl">Received (Last 30d)</div><div class="stat-val green mono">$' + (recvCents/100).toFixed(0) + '</div></div>' +
-            '<div class="stat-tile"><div class="stat-lbl">Net (Last 30d)</div><div class="stat-val mono" style="color:' + netColor + ';">' + netPfx + '$' + (Math.abs(netCents)/100).toFixed(0) + '</div></div>' +
-          '</div>' +
-          '<div class="card" style="padding:16px;margin-bottom:16px;">' +
-            '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">' +
-              '<div style="font-size:13px;font-weight:700;color:var(--text-mute);text-transform:uppercase;letter-spacing:.05em;">BNPL Utilization</div>' +
-              '<div class="mono" style="font-size:15px;font-weight:700;color:' + utilColor + ';">' + utilPct + '%</div>' +
-            '</div>' +
-            '<div class="progress"><span style="width:' + Math.min(utilPct,100) + '%;background:' + utilColor + ';"></span></div>' +
-            '<div style="display:flex;justify-content:space-between;margin-top:8px;font-size:11px;color:var(--text-faint);">' +
-              '<span>$' + ((summary.total_outstanding_cents||0)/100).toFixed(0) + ' outstanding</span>' +
-              '<span>$' + ((summary.total_overdue_cents||0)/100).toFixed(0) + ' overdue</span>' +
-              '<span>$' + ((summary.total_settled_cents||0)/100).toFixed(0) + ' settled</span>' +
-            '</div>' +
-          '</div>';
-        if (statsEl) statsEl.innerHTML = statsHTML;
-
-        if (!txns.length) {
-          if (txnsEl) txnsEl.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-mute);font-size:13px;">No wallet transactions yet.</div>';
-          return;
-        }
-        var txnRows = txns.slice(0,30).map(function(t) {
-          var isDeposit = t.transaction_type === 'deposit';
-          var cls   = isDeposit ? 'pos' : 'neg';
-          var dc    = isDeposit ? 'dir-in' : 'dir-out';
-          var dl    = isDeposit ? 'IN' : 'OUT';
-          var pfx   = isDeposit ? '+' : '−';
-          var date  = (t.created_at||'').slice(0,10);
-          var avcls = isDeposit ? 'av-emerald' : 'av-rose';
-          var lbl   = isDeposit ? 'Deposit' : 'Withdrawal';
-          return '<div class="row">' +
-            '<div class="row-avatar ' + avcls + '" style="font-size:16px;">' + (isDeposit?'↓':'↑') + '</div>' +
-            '<div class="row-body"><div class="row-title"><b>' + lbl + '</b><span class="dir-badge ' + dc + '">' + dl + '</span></div>' +
-            '<div class="row-sub">' + date + '</div></div>' +
-            '<div class="row-right"><div class="row-amt ' + cls + ' mono">' + pfx + '$' + ((t.amount_cents||0)/100).toFixed(2) + '</div></div></div>';
-        }).join('');
-        if (txnsEl) txnsEl.innerHTML = '<div class="card">' + txnRows + '</div>';
-      })
-      .catch(function() {
-        if (statsEl) statsEl.innerHTML = '<div style="color:var(--rose-hi);text-align:center;padding:20px;font-size:13px;">Could not load wallet data.</div>';
       });
   }
 
@@ -1601,81 +1873,6 @@ func dashboardScript() string {
     apiPost('/wallet/withdraw', { amount_cents: amtCents },
       function() { closeSheet('withdraw'); showToast('Withdrawal successful'); setTimeout(function(){location.reload();},1000); },
       function(e) { showToast(e, 'warn'); });
-  }
-
-  // ---- Analytics -------------------------------------------------------------
-  function loadAnalyticsData() {
-    var container = document.getElementById('analytics-content');
-    var colors = ['av-indigo','av-amber','av-emerald','av-violet','av-cyan'];
-    Promise.all([
-      fetch('/wallet/recipients/top',    {credentials:'same-origin'}).then(function(r){return r.json();}).catch(function(){return[];}),
-      fetch('/wallet/spending/monthly',  {credentials:'same-origin'}).then(function(r){return r.json();}).catch(function(){return{};}),
-      fetch('/wallet/credit/history',    {credentials:'same-origin'}).then(function(r){return r.json();}).catch(function(){return[];})
-    ]).then(function(results) {
-      var recipients   = Array.isArray(results[0]) ? results[0] : [];
-      var monthly      = results[1] || {};
-      var creditHist   = Array.isArray(results[2]) ? results[2] : [];
-
-      // Top recipients
-      var rHTML = '<div class="section-row" style="margin-top:0;"><h2>Top Recipients (Last 90d)</h2></div>';
-      if (!recipients.length) {
-        rHTML += '<div style="color:var(--text-mute);font-size:13px;padding:12px 0;">No payment data yet.</div>';
-      } else {
-        rHTML += '<div class="card">' + recipients.map(function(r,i) {
-          var p  = r.profile || {};
-          var dn = p.name || p.id || '?';
-          var ini = computeInitials(dn);
-          return '<div class="row"><div class="row-avatar ' + (p.profile_color || colors[i%5]) + '">' + ini + '</div>' +
-            '<div class="row-body"><div class="row-title"><b>' + dn + '</b></div><div class="row-sub">@' + (p.id||'?') + '</div></div>' +
-            '<div class="row-right"><div class="row-amt neg mono">$' + ((r.total_sent_cents||0)/100).toFixed(0) + '</div><div class="row-time">sent</div></div></div>';
-        }).join('') + '</div>';
-      }
-
-      // Monthly
-      var sentCents = monthly.total_out_cents           || 0;
-      var recvCents = monthly.total_in_cents            || 0;
-      var bnplCents = monthly.active_bnpl_charges_cents || 0;
-      var mHTML = '<div class="section-row"><h2>This Month</h2></div>' +
-        '<div class="stat-grid" style="margin-bottom:16px;">' +
-          '<div class="stat-tile"><div class="stat-lbl">Sent</div><div class="stat-val mono" style="color:var(--rose-hi);">$' + (sentCents/100).toFixed(0) + '</div></div>' +
-          '<div class="stat-tile"><div class="stat-lbl">Received</div><div class="stat-val green mono">$' + (recvCents/100).toFixed(0) + '</div></div>' +
-          '<div class="stat-tile"><div class="stat-lbl">BNPL</div><div class="stat-val indigo mono">$' + (bnplCents/100).toFixed(0) + '</div></div>' +
-        '</div>';
-
-      // Credit history
-      var cHTML = '<div class="section-row"><h2>Credit Score History</h2></div>';
-      if (!creditHist.length) {
-        cHTML += '<div style="color:var(--text-mute);font-size:13px;padding:12px 0;">No score history yet.</div>';
-      } else {
-        cHTML += '<div class="card">' + creditHist.slice(0,12).map(function(e) {
-          var delta  = e.delta || 0;
-          var isPos  = delta >= 0;
-          var date   = typeof e.created_at === 'string' ? e.created_at.slice(0,10) : '';
-          var avcls  = isPos ? 'av-emerald' : 'av-rose';
-          var amtcls = isPos ? 'pos' : 'neg';
-          return '<div class="row"><div class="row-avatar ' + avcls + '" style="font-size:14px;">' + (isPos?'▲':'▼') + '</div>' +
-            '<div class="row-body"><div class="row-title"><b>Score adjustment</b></div><div class="row-sub">New score: ' + (e.score||0) + '</div></div>' +
-            '<div class="row-right"><div class="row-amt ' + amtcls + ' mono">' + (isPos?'+':'') + delta + '</div><div class="row-time">' + date + '</div></div></div>';
-        }).join('') + '</div>';
-      }
-
-      if (container) container.innerHTML = rHTML + mHTML + cHTML;
-    }).catch(function() {
-      if (container) container.innerHTML = '<div style="color:var(--rose-hi);text-align:center;padding:20px;font-size:13px;">Could not load analytics.</div>';
-    });
-  }
-
-  // ---- Settings --------------------------------------------------------------
-  function loadSettingsData() {
-    fetch('/settings/get', { credentials: 'same-origin' })
-      .then(function(r) { return r.json(); })
-      .then(function(s) {
-        var emailEl = document.getElementById('toggle-email-notif');
-        var discEl  = document.getElementById('toggle-discoverable');
-        if (emailEl) emailEl.checked = s.email_notifications !== false;
-        if (discEl)  discEl.checked  = s.is_discoverable !== false;
-      })
-      .catch(function() {});
   }
 
   function submitUpdateField(field, value, label) {
@@ -1719,62 +1916,6 @@ func dashboardScript() string {
       function(e) { showToast(e, 'warn'); });
   }
 
-  // ---- Unified activity feed -------------------------------------------------
-  function loadUnifiedActivity() {
-    var el = document.getElementById('unified-feed');
-    if (!el) return;
-    fetch('/payments/activity', { credentials: 'same-origin' })
-      .then(function(r) { return r.json(); })
-      .then(function(items) {
-        if (!Array.isArray(items) || !items.length) {
-          el.innerHTML = '<div style="text-align:center;padding:28px 16px;color:var(--text-mute);font-size:13px;">No activity yet.</div>';
-          return;
-        }
-        var rows = items.map(function(item) {
-          var amt  = ((item.amount_cents || 0) / 100).toFixed(2);
-          var ini  = computeInitials(item.peer_name || item.peer_id || '?');
-          var date = (item.created_at || '').slice(0, 10);
-          var note = item.note || '';
-          var cls, amtCls, prefix, title, extra;
-          switch (item.kind) {
-            case 'payment_sent':
-              cls = 'av-indigo'; amtCls = 'neg'; prefix = '−';
-              title = 'You paid <b>' + (item.peer_name || item.peer_id) + '</b>';
-              extra = ''; break;
-            case 'payment_received':
-              cls = 'av-emerald'; amtCls = 'pos'; prefix = '+';
-              title = '<b>' + (item.peer_name || item.peer_id) + '</b> paid you';
-              extra = ''; break;
-            case 'request_sent':
-              cls = 'av-amber'; amtCls = 'req'; prefix = '';
-              title = 'You requested from <b>' + (item.peer_name || item.peer_id) + '</b>';
-              extra = ''; break;
-            case 'request_received':
-              cls = 'av-violet'; amtCls = 'req'; prefix = '';
-              title = '<b>' + (item.peer_name || item.peer_id) + '</b> requested';
-              extra = item.status === 'pending'
-                ? '<button onclick="payRequest(\'' + item.id + '\')" style="background:var(--indigo);color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;margin-bottom:4px;">Pay It</button>'
-                : '';
-              break;
-            default:
-              cls = 'av-indigo'; amtCls = ''; prefix = ''; title = item.kind; extra = '';
-          }
-          var sub = note ? (item.status !== 'completed' ? note + ' · ' + item.status : note) : item.status;
-          return '<div class="row">' +
-            '<div class="row-avatar ' + cls + '">' + ini + '</div>' +
-            '<div class="row-body"><div class="row-title">' + title + '</div><div class="row-sub">' + sub + '</div></div>' +
-            '<div class="row-right">' + extra +
-              '<div class="row-amt ' + amtCls + ' mono">' + (prefix ? prefix + '$' + amt : '$' + amt) + '</div>' +
-              '<div class="row-time">' + date + '</div>' +
-            '</div></div>';
-        }).join('');
-        el.innerHTML = '<div class="card">' + rows + '</div>';
-      })
-      .catch(function() {
-        el.innerHTML = '<div style="text-align:center;padding:20px;color:var(--rose-hi);font-size:13px;">Could not load activity.</div>';
-      });
-  }
-
   function payRequest(requestID) {
     apiPost('/payments/request/fulfill', { request_id: requestID },
       function() {
@@ -1787,17 +1928,16 @@ func dashboardScript() string {
 
   // ---- Profile color ---------------------------------------------------------
   function submitUpdateColor(color) {
-    var allColors = ['av-indigo','av-amber','av-emerald','av-violet','av-cyan','av-rose','av-pink'];
     apiPost('/users/update/color', { color: color },
       function() {
         showToast('Color updated');
         document.querySelectorAll('.avatar-btn, .avatar-xl').forEach(function(el) {
-          allColors.forEach(function(c) { el.classList.remove(c); });
-          el.classList.add(color);
+          el.style.background = color;
+          el.style.color = '#fff';
         });
         document.querySelectorAll('.color-swatch').forEach(function(sw) {
           sw.style.boxShadow = sw.dataset.color === color
-            ? '0 0 0 3px var(--surface),0 0 0 5px currentColor' : '';
+            ? '0 0 0 3px var(--surface),0 0 0 5px ' + color : '';
         });
       },
       function(e) { showToast(e, 'warn'); }
@@ -1829,7 +1969,7 @@ func dashboardScript() string {
 
 // ---- Main shell --------------------------------------------------------------
 
-func dashboardHTML(user *models.User, friends []models.Profile, installments []models.Installment, overdueInstallments []models.Installment, incomingRequests []models.PaymentRequest, friendRequests []models.FriendRequest, notifications []models.Notification, groups []models.Group, groupInvitations []models.GroupInvitation) string {
+func dashboardHTML(user *models.User, friends []models.Profile, installments []models.InstallmentDetail, overdueInstallments []models.InstallmentDetail, incomingRequests []models.PaymentRequest, friendRequests []models.FriendRequest, notifications []models.Notification, groups []models.Group, groupInvitations []models.GroupInvitation, activityFeed []models.ActivityItem, memberCounts map[string]int, wDash *walletDashboard, aDash *analyticsDashboard, userSettings *models.UserSettings) string {
 	name := displayName(user)
 	avatar := initials(name)
 	handle := user.ID
@@ -1840,7 +1980,7 @@ func dashboardHTML(user *models.User, friends []models.Profile, installments []m
 	}
 	profileColor := user.ProfileColor
 	if profileColor == "" {
-		profileColor = "av-indigo"
+		profileColor = "#4ade80"
 	}
 
 	var outstandingBNPLCents int
@@ -1877,7 +2017,7 @@ func dashboardHTML(user *models.User, friends []models.Profile, installments []m
           <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
           ` + notifBadge + `
         </button>
-        <button class="avatar-btn ` + profileColor + `" onclick="goView('profile')" aria-label="Profile">` + avatar + `</button>
+        <button class="avatar-btn" style="background:` + profileColor + `;color:#fff" onclick="goView('profile')" aria-label="Profile">` + avatar + `</button>
       </div>
     </div>
   </header>
@@ -1922,15 +2062,15 @@ func dashboardHTML(user *models.User, friends []models.Profile, installments []m
 
     <main class="content">
 ` + viewHome(name, user, overdueInstallments, installments, incomingRequests) + `
-` + viewActivity(installments, overdueInstallments, incomingRequests) + `
+` + viewActivity(installments, overdueInstallments, incomingRequests, activityFeed) + `
 ` + viewFriends(friends, friendRequests) + `
-` + viewGroups(groups, groupInvitations, handle) + `
+` + viewGroups(groups, groupInvitations, handle, memberCounts) + `
 ` + viewGroupDetail() + `
-` + viewAnalytics() + `
-` + viewWallet(user) + `
+` + viewAnalytics(aDash) + `
+` + viewWallet(user, wDash) + `
 ` + viewNotifications(notifications) + `
 ` + viewProfile(user, avatar, name, handle, email, phone, friends, installments, groups) + `
-` + viewSettings(user) + `
+` + viewSettings(user, userSettings) + `
     </main>
   </div>
 

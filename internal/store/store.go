@@ -53,6 +53,23 @@ func NewFromPath(path string) (*Store, error) {
 	// SQLite returns "duplicate column name" on re-run; we intentionally ignore that error.
 	s.db.Exec(`ALTER TABLE users ADD COLUMN profile_color TEXT NOT NULL DEFAULT 'av-indigo';`)
 
+	// Idempotent migration: convert legacy CSS class names to the new hex palette.
+	// Each UPDATE is a no-op on any row that was already migrated or defaulted to a hex value.
+	for _, pair := range [][2]string{
+		{"av-indigo", "#c084fc"},
+		{"av-violet", "#c084fc"},
+		{"av-amber", "#facc15"},
+		{"av-emerald", "#4ade80"},
+		{"av-cyan", "#22d3ee"},
+		{"av-rose", "#fb7185"},
+		{"av-pink", "#db2777"},
+	} {
+		// pair[0] = old CSS class name, pair[1] = replacement hex value
+		s.db.Exec(`UPDATE users SET profile_color = ? WHERE profile_color = ?;`, pair[1], pair[0])
+	}
+	// Any remaining non-hex value (e.g. 'av-indigo' default on the column) becomes Mint Green.
+	s.db.Exec(`UPDATE users SET profile_color = '#4ade80' WHERE profile_color NOT LIKE '#%';`)
+
 	// Seed the virtual treasury account used as counterparty in BNPL fund flows.
 	// INSERT OR IGNORE is idempotent — safe on every restart and on existing databases.
 	// is_active=0 keeps it invisible in all user-facing list queries.
@@ -63,7 +80,7 @@ INSERT OR IGNORE INTO users
    is_active, profile_color)
 VALUES
   ('app_treasury','NO_LOGIN','App Treasury','','',
-   9999999999, 0, 0, 0, 'av-indigo');
+   9999999999, 0, 0, 0, '#4ade80');
 `)
 
 	return s, nil
@@ -83,7 +100,7 @@ func (s *Store) createTables() error {
 		credit_score INTEGER NOT NULL DEFAULT 50,
 		credit_limit_cents INTEGER NOT NULL DEFAULT 100000,
 		is_active INTEGER NOT NULL DEFAULT 1,
-		profile_color TEXT NOT NULL DEFAULT 'av-indigo',
+		profile_color TEXT NOT NULL DEFAULT '#4ade80',
 		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 	);`
 
