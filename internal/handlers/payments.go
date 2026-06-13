@@ -286,42 +286,41 @@ func (h *Handler) ListOutgoingPaymentRequests(w http.ResponseWriter, r *http.Req
 	WriteJSON(w, http.StatusOK, requests)
 }
 
-// UpdatePaymentRequestStatus transitions a payment request to a new status (e.g. accepted, declined).
+// UpdatePaymentRequestStatus transitions a payment request to "declined" or "cancelled".
+// The payer may decline; the requester may cancel. Completed status is intentionally
+// excluded — use FulfillPaymentRequest to atomically pay and close a request.
 func (h *Handler) UpdatePaymentRequestStatus(w http.ResponseWriter, r *http.Request) {
-	// Ensure this endpoint only accepts POST requests
 	if r.Method != http.MethodPost {
 		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only POST methods are permitted to this route"})
 		return
 	}
 
-	// Confirm caller validation session variables before editing invoice record statuses
-	_, authorized := h.authenticateSession(w, r)
+	userID, authorized := h.authenticateSession(w, r)
 	if !authorized {
 		return
 	}
 
-	// Initialize a custom, empty struct to hold the incoming data
 	type Input struct {
 		PaymentID string `json:"payment_id"`
 		NewStatus string `json:"new_status"`
 	}
 	var input Input
-
-	// Read the JSON text out of the web request body and decode it into the variable
-	err := json.NewDecoder(r.Body).Decode(&input)
-	if err != nil {
-		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON request payload formatting"})
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid request body"})
 		return
 	}
 
-	// Pass the variable down to the database engine
-	err = h.store.UpdatePaymentRequestStatus(input.PaymentID, input.NewStatus)
-	if err != nil {
+	allowed := map[string]bool{"declined": true, "cancelled": true}
+	if !allowed[input.NewStatus] {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid status: must be 'declined' or 'cancelled'"})
+		return
+	}
+
+	if err := h.store.UpdatePaymentRequestStatus(input.PaymentID, input.NewStatus, userID); err != nil {
 		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": friendlyError(err)})
 		return
 	}
 
-	// Send a successful response back out the window along with the created data
 	WriteJSON(w, http.StatusOK, input)
 }
 
@@ -371,27 +370,30 @@ func (h *Handler) GetUnifiedActivity(w http.ResponseWriter, r *http.Request) {
 
 // friendPickerHTML renders a horizontally scrollable avatar grid for friend selection,
 // replacing plain <select> elements in pay, request, and BNPL sheets.
+// User-supplied fields (IDs, names) are rendered through html/template which applies
+// context-sensitive escaping: HTML entities in text/attribute context, JS string
+// escaping inside onclick='...' arguments.
 func friendPickerHTML(pickerID string, friends []models.Profile) string {
 	if len(friends) == 0 {
 		return `<div class="fp-empty">Add friends to get started.</div>`
 	}
 	fallbackColors := []string{"#4ade80", "#22d3ee", "#fb7185", "#facc15", "#c084fc", "#db2777"}
-	out := ""
+	var buf strings.Builder
 	for i, f := range friends {
 		dname := profileDisplayName(&f)
-		ini := initials(dname)
-		hex := f.ProfileColor
-		if hex == "" {
-			hex = fallbackColors[i%len(fallbackColors)]
+		color := f.ProfileColor
+		if color == "" {
+			color = fallbackColors[i%len(fallbackColors)]
 		}
-		safeID := strings.ReplaceAll(f.ID, "'", "")
-		safeName := strings.ReplaceAll(dname, "'", "")
-		out += `<div class="fp-item" data-id="` + f.ID + `" onclick="pickFriend('` + pickerID + `','` + safeID + `','` + safeName + `')" title="` + dname + `">` +
-			`<div class="fp-avatar-sm" style="background:` + hex + `;color:#fff">` + ini + `</div>` +
-			`<div class="fp-name">` + safeName + `</div>` +
-			`</div>`
+		buf.WriteString(renderTmpl(friendPickerItemTmpl, fpItemData{
+			PickerID: pickerID,
+			ID:       f.ID,
+			Name:     dname,
+			Initials: initials(dname),
+			Color:    color,
+		}))
 	}
-	return out
+	return buf.String()
 }
 
 // groupFriendPickerHTML renders groups as fp-item tiles in a horizontally scrollable row,
@@ -401,24 +403,24 @@ func groupFriendPickerHTML(pickerID string, groups []models.Group) string {
 		return `<div class="fp-empty">No groups yet.</div>`
 	}
 	hexColors := []string{"#c084fc", "#22d3ee", "#4ade80", "#facc15", "#fb7185", "#db2777"}
-	out := ""
+	var buf strings.Builder
 	for i, g := range groups {
-		ini := ""
 		runes := []rune(g.Name)
+		ini := ""
 		if len(runes) >= 2 {
 			ini = strings.ToUpper(string(runes[0])) + strings.ToUpper(string(runes[1]))
 		} else if len(runes) == 1 {
 			ini = strings.ToUpper(string(runes[0]))
 		}
-		hex := hexColors[i%len(hexColors)]
-		safeGID := strings.ReplaceAll(g.ID, "'", "")
-		safeName := strings.ReplaceAll(g.Name, "'", "")
-		out += `<div class="fp-item" data-id="` + g.ID + `" onclick="pickFriend('` + pickerID + `','` + safeGID + `','` + safeName + `')" title="` + safeName + `">` +
-			`<div class="fp-avatar-sm" style="background:` + hex + `;color:#fff">` + ini + `</div>` +
-			`<div class="fp-name">` + safeName + `</div>` +
-			`</div>`
+		buf.WriteString(renderTmpl(groupFriendPickerItemTmpl, gpItemData{
+			PickerID: pickerID,
+			ID:       g.ID,
+			Name:     g.Name,
+			Initials: ini,
+			Color:    hexColors[i%len(hexColors)],
+		}))
 	}
-	return out
+	return buf.String()
 }
 
 // groupPickerSectionHTML renders a collapsible groups section below the friends picker.
@@ -428,28 +430,26 @@ func groupPickerSectionHTML(pickerID string, groups []models.Group) string {
 		return ""
 	}
 	hexColors := []string{"#c084fc", "#22d3ee", "#4ade80", "#facc15", "#fb7185", "#db2777"}
-	rows := ""
+	var rowsBuf strings.Builder
 	for i, g := range groups {
-		hex := hexColors[i%len(hexColors)]
-		ini := ""
 		runes := []rune(g.Name)
+		ini := ""
 		if len(runes) >= 2 {
 			ini = strings.ToUpper(string(runes[0])) + strings.ToUpper(string(runes[1]))
 		} else if len(runes) == 1 {
 			ini = strings.ToUpper(string(runes[0]))
 		}
-		safeGID := strings.ReplaceAll(g.ID, "'", "")
-		safeName := strings.ReplaceAll(g.Name, "'", "")
-		rows += `<div class="gp-group-row" onclick="toggleGroupMembers('` + pickerID + `','` + safeGID + `','` + safeName + `',this)">` +
-			`<div class="fp-avatar-sm" style="background:` + hex + `;color:#fff">` + ini + `</div>` +
-			`<div class="fp-name">` + safeName + `</div>` +
-			`<svg class="gp-chev" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>` +
-			`</div>` +
-			`<div class="gp-members-wrap" id="gpm-` + pickerID + `-` + safeGID + `" style="display:none;padding-left:12px;"></div>`
+		rowsBuf.WriteString(renderTmpl(groupPickerRowTmpl, gpRowData{
+			PickerID: pickerID,
+			ID:       g.ID,
+			Name:     g.Name,
+			Initials: ini,
+			Color:    hexColors[i%len(hexColors)],
+		}))
 	}
 	return `<div class="gp-section">` +
 		`<div class="gp-label">Groups</div>` +
-		rows +
+		rowsBuf.String() +
 		`</div>`
 }
 

@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
+	"html"
 	"net/http"
 	"regexp"
 	"strings"
@@ -12,16 +13,20 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+var (
+	reValidID    = regexp.MustCompile(`^[a-z0-9_]+$`)
+	reValidEmail = regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
+	reNonDigit   = regexp.MustCompile(`\D`)
+)
+
 // CreateUser handles new account registration, validating the username format, hashing the
 // password via bcrypt, and writing the new user record to the database.
 func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
-	// Ensure that this endpoint only accepts POST requests
 	if r.Method != http.MethodPost {
 		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only POST requests are permitted on this route"})
 		return
 	}
 
-	// Initialize a custom, empty struct to hold the incoming data
 	type RegistrationInput struct {
 		ID          string `json:"id"`
 		Password    string `json:"password"`
@@ -32,14 +37,17 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 	var input RegistrationInput
 
-	// Read the JSON text out of the web request body and decode it into the Go struct
 	err := json.NewDecoder(r.Body).Decode(&input)
 	if err != nil || input.Password == "" || input.ID == "" {
 		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON request payload formatting or missing account properties"})
 		return
 	}
+	if len(input.Password) < 8 {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Password must be at least 8 characters"})
+		return
+	}
 	input.ID = strings.ToLower(strings.TrimSpace(input.ID))
-	if !regexp.MustCompile(`^[a-z0-9_]+$`).MatchString(input.ID) {
+	if !reValidID.MatchString(input.ID) {
 		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Username may only contain letters, numbers, and underscores"})
 		return
 	}
@@ -52,25 +60,23 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 	combinedName := firstName + " " + lastName
 
-	if !regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`).MatchString(input.Email) {
+	if !reValidEmail.MatchString(input.Email) {
 		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Please enter a valid email address"})
 		return
 	}
-	phoneDigits := regexp.MustCompile(`\D`).ReplaceAllString(input.PhoneNumber, "")
+	phoneDigits := reNonDigit.ReplaceAllString(input.PhoneNumber, "")
 	if len(phoneDigits) != 10 {
 		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Phone number must be exactly 10 digits"})
 		return
 	}
 
-	// Turn plain text password into a non-reversible cryptographic hash (bcrypt.DefaultCost tells it to scramble the password 14 times)
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(input.Password), bcrypt.DefaultCost)
 	if err != nil {
 		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to protect account credentials securely"})
 		return
 	}
 
-	// Map the form input data over to the structural Database model
-	new_user := models.User{
+	newUser := models.User{
 		ID:               input.ID,
 		PasswordHash:     string(hashedPassword),
 		Name:             combinedName,
@@ -81,34 +87,29 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		CreditLimitCents: 100000,
 	}
 
-	// Pass the populated struct down to the database engine
-	err = h.store.CreateUser(&new_user)
+	err = h.store.CreateUser(&newUser)
 	if err != nil {
 		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": friendlyError(err)})
 		return
 	}
 
-	// Send a successful response back out the window along with the created data
-	WriteJSON(w, http.StatusCreated, map[string]string{"status": "ledger user allocation committed successfully", "id": new_user.ID})
+	WriteJSON(w, http.StatusCreated, map[string]string{"status": "ledger user allocation committed successfully", "id": newUser.ID})
 }
 
 // LoginUser authenticates a user by verifying their password hash, checking the account
 // is active, and issuing a session cookie on success.
 func (h *Handler) LoginUser(w http.ResponseWriter, r *http.Request) {
-	// Ensure that this endpoint only accepts POST requests
 	if r.Method != http.MethodPost {
 		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only POST requests are permitted on this route"})
 		return
 	}
 
-	// Initialize a custom, empty struct to hold the incoming data
 	type LoginInput struct {
 		ID       string `json:"id"`
 		Password string `json:"password"`
 	}
 	var input LoginInput
 
-	// Read the JSON text out of the web request body and decode it into the Go struct
 	err := json.NewDecoder(r.Body).Decode(&input)
 	if err != nil {
 		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON request payload formatting"})
@@ -117,7 +118,6 @@ func (h *Handler) LoginUser(w http.ResponseWriter, r *http.Request) {
 
 	input.ID = strings.ToLower(strings.TrimSpace(input.ID))
 
-	// Look up the user by ID
 	user, err := h.store.GetUser(input.ID)
 	if err != nil {
 		WriteJSON(w, http.StatusNotFound, map[string]string{"error": "Invalid User ID or password parameters"})
@@ -129,63 +129,62 @@ func (h *Handler) LoginUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Compare the password to the currently stored password hash
 	err = bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(input.Password))
 	if err != nil {
 		WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "Invalid User ID or password parameters"})
 		return
 	}
 
-	// Issue Cookie Wristband on absolute match success
-	cookie := &http.Cookie{
-		Name:     "session_user_id",
-		Value:    user.ID,
+	token, err := h.sessions.create(user.ID)
+	if err != nil {
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to create session"})
+		return
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     "session_token",
+		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   r.TLS != nil,
 		SameSite: http.SameSiteLaxMode,
-	}
-	http.SetCookie(w, cookie)
-
-	// Return a production-grade structural JSON status acknowledgement tracking packet
+	})
 	WriteJSON(w, http.StatusOK, map[string]any{"authenticated": true, "user_id": user.ID, "name": user.Name})
 }
 
-// Logout clears the session cookie, signing the user out.
-// Browsers persist the cookie until we explicitly expire it with MaxAge=-1.
+// Logout revokes the server-side session token and expires the cookie.
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only POST requests are permitted on this route"})
 		return
 	}
 
-	expired := &http.Cookie{
-		Name:     "session_user_id",
+	if cookie, err := r.Cookie("session_token"); err == nil {
+		h.sessions.delete(cookie.Value)
+	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     "session_token",
 		Value:    "",
 		Path:     "/",
 		MaxAge:   -1,
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
-	}
-	http.SetCookie(w, expired)
-
+	})
 	WriteJSON(w, http.StatusOK, map[string]bool{"success": true})
 }
 
 // GetUser returns the full user record for the authenticated session, blocking deactivated accounts.
 func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
-	// Ensure that this endpoint only accepts GET requests
 	if r.Method != http.MethodGet {
 		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only GET requests are permitted on this route"})
 		return
 	}
 
-	// Verify session context parameter state natively through current session validation
 	userID, authorized := h.authenticateSession(w, r)
 	if !authorized {
 		return
 	}
 
-	// Query the database engine for this user using our secure identity
 	user, err := h.store.GetUser(userID)
 	if err != nil {
 		WriteJSON(w, http.StatusNotFound, map[string]string{"error": friendlyError(err)})
@@ -196,122 +195,103 @@ func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Package the returned data struct into JSON and ship it over the wire
 	WriteJSON(w, http.StatusOK, user)
 }
 
 // ListUsers returns all active user accounts for authenticated callers.
 func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
-	// Ensure that this endpoint only accepts GET requests
 	if r.Method != http.MethodGet {
 		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only GET requests are permitted to this route"})
 		return
 	}
 
-	// Confirm user active session validity state before parsing database records
 	_, authorized := h.authenticateSession(w, r)
 	if !authorized {
 		return
 	}
 
-	// Query the database engine for all users
 	users, err := h.store.ListUsers()
 	if err != nil {
 		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": friendlyError(err)})
 		return
 	}
 
-	// Package the returned data struct into JSON and ship it over the wire
 	WriteJSON(w, http.StatusOK, users)
 }
 
 // ListProfiles returns the public profiles of all active users for authenticated callers.
 func (h *Handler) ListProfiles(w http.ResponseWriter, r *http.Request) {
-	// Ensure that this endpoint only accepts GET requests
 	if r.Method != http.MethodGet {
 		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only GET requests are permitted to this route"})
 		return
 	}
 
-	// Confirm user active session validity state before parsing database records
 	_, authorized := h.authenticateSession(w, r)
 	if !authorized {
 		return
 	}
 
-	// Query the database engine for all profiles
 	profiles, err := h.store.ListProfiles()
 	if err != nil {
 		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": friendlyError(err)})
 		return
 	}
 
-	// Package the returned data struct into JSON and ship it over the wire
 	WriteJSON(w, http.StatusOK, profiles)
 }
 
 // GetProfile returns the public profile for a specific active user, identified by the user_id query parameter.
 func (h *Handler) GetProfile(w http.ResponseWriter, r *http.Request) {
-	// Ensure that this endpoint only accepts GET requests
 	if r.Method != http.MethodGet {
 		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only GET requests are permitted to this route"})
 		return
 	}
 
-	// Confirm user active session validity state before parsing database records
 	_, authorized := h.authenticateSession(w, r)
 	if !authorized {
 		return
 	}
 
-	// Extract the target profile identifier field from the URL query strings parameter bucket
 	userID := r.URL.Query().Get("user_id")
 	if userID == "" {
 		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Missing required URL query parameter: 'user_id'"})
 		return
 	}
 
-	// Query the database engine for this profile
 	profile, err := h.store.GetProfile(userID)
 	if err != nil {
 		WriteJSON(w, http.StatusNotFound, map[string]string{"error": friendlyError(err)})
 		return
 	}
 
-	// Package the returned data struct into JSON and ship it over the wire
 	WriteJSON(w, http.StatusOK, profile)
 }
 
 // SearchProfiles performs a fuzzy search over public user profiles by name or ID,
 // returning all matching active accounts for the authenticated caller.
 func (h *Handler) SearchProfiles(w http.ResponseWriter, r *http.Request) {
-	// Ensure that this endpoint only accepts GET requests
 	if r.Method != http.MethodGet {
 		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only GET requests are permitted to this route"})
 		return
 	}
 
-	// Confirm user active session validity state before executing search queries
 	_, authorized := h.authenticateSession(w, r)
 	if !authorized {
 		return
 	}
 
-	// Extract the search term from the URL query parameters
 	queryStr := r.URL.Query().Get("q")
 	if queryStr == "" {
 		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Missing required URL query parameter: 'q'"})
 		return
 	}
 
-	// Pass the search term down to the database engine
 	profiles, err := h.store.SearchProfiles(queryStr)
 	if err != nil {
 		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": friendlyError(err)})
 		return
 	}
 
-	// Package the returned data into JSON and ship it over the wire
 	WriteJSON(w, http.StatusOK, profiles)
 }
 
@@ -539,11 +519,11 @@ func viewProfile(user *models.User, avatar, name, handle, email, phone string, f
 	return `
 <section class="view" data-view="profile">
   <div class="profile-hero">
-    <div class="avatar-xl" style="background:` + avatarColor + `;color:#fff">` + avatar + `</div>
-    <div class="profile-name">` + name + `</div>
-    <div class="profile-handle">@` + handle + `</div>
-    <div class="profile-email">` + email + `</div>
-    <div class="profile-phone_number">` + phone + `</div>
+    <div class="avatar-xl" style="background:` + avatarColor + `;color:#fff">` + html.EscapeString(avatar) + `</div>
+    <div class="profile-name">` + html.EscapeString(name) + `</div>
+    <div class="profile-handle">@` + html.EscapeString(handle) + `</div>
+    <div class="profile-email">` + html.EscapeString(email) + `</div>
+    <div class="profile-phone_number">` + html.EscapeString(phone) + `</div>
     <div class="profile-phone_number">` + createdAtFormatted + `</div>
   </div>
 
@@ -714,7 +694,7 @@ func (h *Handler) UpdateEmail(w http.ResponseWriter, r *http.Request) {
 		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Missing required field: value"})
 		return
 	}
-	if !regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`).MatchString(input.Value) {
+	if !reValidEmail.MatchString(input.Value) {
 		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Please enter a valid email address"})
 		return
 	}
@@ -745,7 +725,7 @@ func (h *Handler) UpdatePhoneNumber(w http.ResponseWriter, r *http.Request) {
 		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Missing required field: value"})
 		return
 	}
-	digits := regexp.MustCompile(`\D`).ReplaceAllString(input.Value, "")
+	digits := reNonDigit.ReplaceAllString(input.Value, "")
 	if len(digits) != 10 {
 		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Phone number must be exactly 10 digits"})
 		return
@@ -835,16 +815,17 @@ func (h *Handler) DeactivateAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Immediately expire the session cookie so the browser is forced back to login
+	if cookie, err := r.Cookie("session_token"); err == nil {
+		h.sessions.delete(cookie.Value)
+	}
 	http.SetCookie(w, &http.Cookie{
-		Name:     "session_user_id",
+		Name:     "session_token",
 		Value:    "",
 		Path:     "/",
 		MaxAge:   -1,
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
 	})
-
 	WriteJSON(w, http.StatusOK, map[string]bool{"success": true})
 }
 

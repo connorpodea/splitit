@@ -21,8 +21,8 @@ type User struct {
 type Profile struct {
 	ID           string `json:"id"`
 	Name         string `json:"name"`
-	Email        string `json:"email"`
-	PhoneNumber  string `json:"phone_number"`
+	Email        string `json:"-"`
+	PhoneNumber  string `json:"-"`
 	ProfileColor string `json:"profile_color"`
 	CreatedAt    string `json:"created_at"`
 }

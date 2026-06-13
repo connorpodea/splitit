@@ -11,7 +11,7 @@ import (
 func (s *Store) CreateGroup(group *models.Group) error {
 	// Generate a unique group identifier inside the store so the client never controls primary keys
 	if group.ID == "" {
-		group.ID = create_new_ID()
+		group.ID = newID()
 	}
 
 	transaction, err := s.db.Begin()
@@ -137,7 +137,7 @@ func (s *Store) SendGroupInvitation(groupID, senderID, receiverID string) error 
 	(id, group_id, sender_id, receiver_id)
 	VALUES (?,?,?,?);`
 
-	_, err := s.db.Exec(query, create_new_ID(), groupID, senderID, receiverID)
+	_, err := s.db.Exec(query, newID(), groupID, senderID, receiverID)
 	if err != nil {
 		return fmt.Errorf("failed to insert group invitation from sender '%s' to receiver '%s' for group ID '%s': %w", senderID, receiverID, groupID, err)
 	}
@@ -313,8 +313,16 @@ func (s *Store) ListOutgoingGroupInvitations(senderID string) ([]models.GroupInv
 }
 
 // RemoveGroupMember forcibly removes a target user from a group's membership roster.
-// Intended for group admin or moderation actions.
-func (s *Store) RemoveGroupMember(groupID, targetUserID string) error {
+// callerID must be the group creator; the store enforces this with a pre-flight creator check.
+func (s *Store) RemoveGroupMember(groupID, targetUserID, callerID string) error {
+	var creatorID string
+	if err := s.db.QueryRow(`SELECT creator_id FROM groups WHERE id = ?;`, groupID).Scan(&creatorID); err != nil {
+		return fmt.Errorf("removal rejected: group '%s' not found: %w", groupID, err)
+	}
+	if creatorID != callerID {
+		return fmt.Errorf("removal rejected: only the group creator can remove members from group '%s'", groupID)
+	}
+
 	query := `
 	DELETE FROM group_members
 	WHERE group_id = ? AND member_id = ?;`

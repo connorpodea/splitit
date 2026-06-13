@@ -2,7 +2,9 @@ package handlers
 
 import (
 	"encoding/json"
+	"html/template"
 	"net/http"
+	"strings"
 
 	"github.com/connorpodea/splitit/internal/models"
 )
@@ -63,7 +65,7 @@ func (h *Handler) MarkNotificationSeen(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.store.MarkNotificationSeen(input.NotifID, userID); err != nil {
-		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": friendlyError(err)})
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": friendlyError(err)})
 		return
 	}
 	WriteJSON(w, http.StatusOK, map[string]bool{"success": true})
@@ -104,7 +106,7 @@ func viewNotifications(notifications []models.Notification) string {
 		"group_invitation": "#c084fc",
 	}
 
-	rows := ""
+	var rowsBuf strings.Builder
 	for _, n := range notifications {
 		icon := typeIcon[n.Type]
 		if icon == "" {
@@ -118,16 +120,17 @@ func viewNotifications(notifications []models.Notification) string {
 		if len(date) >= 10 {
 			date = date[:10]
 		}
-		rows += `
-    <div class="row" style="cursor:pointer;" onclick="dismissNotif('` + n.ID + `','` + n.LinkView + `',this)">
-      <div class="row-avatar" style="background:` + hex + `;color:#fff">` + icon + `</div>
-      <div class="row-body">
-        <div class="row-title"><b>` + n.Title + `</b></div>
-        <div class="row-sub">` + n.Body + `</div>
-      </div>
-      <div class="row-right"><div class="row-time">` + date + `</div></div>
-    </div>`
+		rowsBuf.WriteString(renderTmpl(notifRowTmpl, notifRowData{
+			ID:       n.ID,
+			LinkView: n.LinkView,
+			IconSVG:  template.HTML(icon), // server-controlled static SVG
+			Color:    hex,
+			Title:    n.Title,
+			Body:     n.Body,
+			Date:     date,
+		}))
 	}
+	rows := rowsBuf.String()
 
 	emptyBlock := ""
 	if len(notifications) == 0 {

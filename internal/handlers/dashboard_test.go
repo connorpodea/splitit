@@ -24,7 +24,7 @@ func TestGetInitialView_RendersActivityFeed(t *testing.T) {
 	}
 
 	rr := httptest.NewRecorder()
-	h.GetInitialView(rr, sessionReq(t, http.MethodGet, "/", "", "alice"))
+	h.GetInitialView(rr, sessionReq(t, h, http.MethodGet, "/", "", "alice"))
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rr.Code)
@@ -58,7 +58,7 @@ func TestGetInitialView_RendersGroupMemberCounts(t *testing.T) {
 	}
 
 	rr := httptest.NewRecorder()
-	h.GetInitialView(rr, sessionReq(t, http.MethodGet, "/", "", "alice"))
+	h.GetInitialView(rr, sessionReq(t, h, http.MethodGet, "/", "", "alice"))
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rr.Code)
@@ -82,7 +82,7 @@ func TestGetInitialView_RendersWalletStats(t *testing.T) {
 	}
 
 	rr := httptest.NewRecorder()
-	h.GetInitialView(rr, sessionReq(t, http.MethodGet, "/", "", "alice"))
+	h.GetInitialView(rr, sessionReq(t, h, http.MethodGet, "/", "", "alice"))
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rr.Code)
@@ -103,7 +103,7 @@ func TestGetInitialView_RendersAnalytics(t *testing.T) {
 	seedUser(t, s, "alice", 0)
 
 	rr := httptest.NewRecorder()
-	h.GetInitialView(rr, sessionReq(t, http.MethodGet, "/", "", "alice"))
+	h.GetInitialView(rr, sessionReq(t, h, http.MethodGet, "/", "", "alice"))
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rr.Code)
@@ -136,7 +136,7 @@ func TestGetInitialView_RendersSettingsToggles(t *testing.T) {
 	}
 
 	rr := httptest.NewRecorder()
-	h.GetInitialView(rr, sessionReq(t, http.MethodGet, "/", "", "alice"))
+	h.GetInitialView(rr, sessionReq(t, h, http.MethodGet, "/", "", "alice"))
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rr.Code)
@@ -159,7 +159,7 @@ func TestGetInitialView_NoLazyLoadPlaceholders(t *testing.T) {
 	seedUser(t, s, "alice", 0)
 
 	rr := httptest.NewRecorder()
-	h.GetInitialView(rr, sessionReq(t, http.MethodGet, "/", "", "alice"))
+	h.GetInitialView(rr, sessionReq(t, h, http.MethodGet, "/", "", "alice"))
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rr.Code)

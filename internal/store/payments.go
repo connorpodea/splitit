@@ -14,7 +14,7 @@ import (
 func (s *Store) Pay(payment *models.Payment) error {
 	// Generate a unique transaction identifier inside the store so the client never controls primary keys
 	if payment.ID == "" {
-		payment.ID = create_new_ID()
+		payment.ID = newID()
 	}
 
 	transaction, err := s.db.Begin()
@@ -87,19 +87,19 @@ func (s *Store) Pay(payment *models.Payment) error {
 	}
 
 	// Record wallet activity for real users only (skip app_treasury internal transfers)
-	if payment.SenderID != "app_treasury" {
+	if payment.SenderID != treasuryID {
 		_, err = transaction.Exec(
 			`INSERT INTO wallet_transactions (id, user_id, amount_cents, transaction_type) VALUES (?, ?, ?, 'withdrawal');`,
-			create_new_ID(), payment.SenderID, payment.AmountCents,
+			newID(), payment.SenderID, payment.AmountCents,
 		)
 		if err != nil {
 			return fmt.Errorf("ledger settlement failed: unable to record withdrawal for sender '%s': %w", payment.SenderID, err)
 		}
 	}
-	if payment.ReceiverID != "app_treasury" {
+	if payment.ReceiverID != treasuryID {
 		_, err = transaction.Exec(
 			`INSERT INTO wallet_transactions (id, user_id, amount_cents, transaction_type) VALUES (?, ?, ?, 'deposit');`,
-			create_new_ID(), payment.ReceiverID, payment.TotalAmountCents,
+			newID(), payment.ReceiverID, payment.TotalAmountCents,
 		)
 		if err != nil {
 			return fmt.Errorf("ledger settlement failed: unable to record deposit for receiver '%s': %w", payment.ReceiverID, err)
@@ -335,7 +335,7 @@ func (s *Store) ListPaymentsBetweenUsers(userID, otherID string) ([]models.Payme
 func (s *Store) CreatePaymentRequest(request *models.PaymentRequest) error {
 	// Generate a unique request identifier inside the store so the client never controls primary keys
 	if request.ID == "" {
-		request.ID = create_new_ID()
+		request.ID = newID()
 	}
 	request.Status = "pending"
 
@@ -442,26 +442,26 @@ func (s *Store) ListOutgoingPaymentRequests(userID string) ([]models.PaymentRequ
 	return requests, nil
 }
 
-// UpdatePaymentRequestStatus transitions a payment request to a new status string (e.g. "accepted", "declined").
-func (s *Store) UpdatePaymentRequestStatus(paymentID, newStatus string) error {
-	query := `
-	UPDATE payment_requests
-	SET status = ?
-	WHERE id = ?;`
-
-	result, err := s.db.Exec(query, newStatus, paymentID)
+// UpdatePaymentRequestStatus transitions a payment request to a new status.
+// callerID must be either the payer_id (can decline) or requester_id (can cancel);
+// the SQL WHERE clause enforces this so no separate ownership lookup is needed.
+func (s *Store) UpdatePaymentRequestStatus(paymentID, newStatus, callerID string) error {
+	result, err := s.db.Exec(`
+		UPDATE payment_requests
+		SET status = ?
+		WHERE id = ? AND (payer_id = ? OR requester_id = ?);`,
+		newStatus, paymentID, callerID, callerID,
+	)
 	if err != nil {
-		return fmt.Errorf("state machine error: failed to transition payment invoice request ID '%s' to state token '%s': %w", paymentID, newStatus, err)
+		return fmt.Errorf("failed to update payment request %s: %w", paymentID, err)
 	}
-
-	rowsAffected, err := result.RowsAffected()
+	rows, err := result.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("failed to read payment request status transition execution metrics: %w", err)
+		return fmt.Errorf("failed to confirm payment request update: %w", err)
 	}
-	if rowsAffected == 0 {
-		return fmt.Errorf("state machine rejected: payment invoice request ID '%s' not found in ledger registry", paymentID)
+	if rows == 0 {
+		return fmt.Errorf("payment request not found or you are not authorised to update it")
 	}
-
 	return nil
 }
 
@@ -470,7 +470,7 @@ func (s *Store) UpdatePaymentRequestStatus(paymentID, newStatus string) error {
 // if any member credit fails, all balance changes are rolled back.
 func (s *Store) PayToGroup(payment *models.Payment) error {
 	if payment.ID == "" {
-		payment.ID = create_new_ID()
+		payment.ID = newID()
 	}
 
 	members, err := s.ListGroupMembers(payment.ReceiverID)
@@ -508,7 +508,7 @@ func (s *Store) PayToGroup(payment *models.Payment) error {
 	if _, err = tx.Exec(`UPDATE users SET balance_cents = balance_cents - ? WHERE id = ?;`, payment.AmountCents, payment.SenderID); err != nil {
 		return fmt.Errorf("group payment failed: unable to deduct %d cents from sender '%s': %w", payment.AmountCents, payment.SenderID, err)
 	}
-	if _, err = tx.Exec(`INSERT INTO wallet_transactions (id, user_id, amount_cents, transaction_type) VALUES (?, ?, ?, 'withdrawal');`, create_new_ID(), payment.SenderID, payment.AmountCents); err != nil {
+	if _, err = tx.Exec(`INSERT INTO wallet_transactions (id, user_id, amount_cents, transaction_type) VALUES (?, ?, ?, 'withdrawal');`, newID(), payment.SenderID, payment.AmountCents); err != nil {
 		return fmt.Errorf("group payment failed: unable to record sender withdrawal for '%s': %w", payment.SenderID, err)
 	}
 
@@ -535,7 +535,7 @@ func (s *Store) PayToGroup(payment *models.Payment) error {
 			return fmt.Errorf("group payment failed: unable to record split payment record for member '%s': %w", recipient.ID, err)
 		}
 
-		if _, err = tx.Exec(`INSERT INTO wallet_transactions (id, user_id, amount_cents, transaction_type) VALUES (?, ?, ?, 'deposit');`, create_new_ID(), recipient.ID, amount); err != nil {
+		if _, err = tx.Exec(`INSERT INTO wallet_transactions (id, user_id, amount_cents, transaction_type) VALUES (?, ?, ?, 'deposit');`, newID(), recipient.ID, amount); err != nil {
 			return fmt.Errorf("group payment failed: unable to record deposit for member '%s': %w", recipient.ID, err)
 		}
 	}
@@ -598,7 +598,7 @@ func (s *Store) RequestFromGroup(request *models.PaymentRequest) error {
 		if i == 0 {
 			amount += remainderCents
 		}
-		id := create_new_ID()
+		id := newID()
 		if _, err = tx.Exec(
 			`INSERT INTO payment_requests (id, requester_id, payer_id, amount_cents, note, status) VALUES (?, ?, ?, ?, ?, 'pending');`,
 			id, request.RequesterID, recipient.ID, amount, request.Note,
@@ -668,7 +668,7 @@ func (s *Store) FulfillPaymentRequest(requestID, payerID string) error {
 		return fmt.Errorf("request fulfillment failed: unable to credit balance to requester '%s': %w", requesterID, err)
 	}
 
-	paymentID := create_new_ID()
+	paymentID := newID()
 	if _, err = tx.Exec(
 		`INSERT INTO payments (id, sender_id, receiver_id, amount_cents, total_amount_cents, note, payment_type, total_installments, status) VALUES (?, ?, ?, ?, ?, '', 'direct', 1, 'completed');`,
 		paymentID, payerID, requesterID, amountCents, amountCents,
@@ -678,13 +678,13 @@ func (s *Store) FulfillPaymentRequest(requestID, payerID string) error {
 
 	if _, err = tx.Exec(
 		`INSERT INTO wallet_transactions (id, user_id, amount_cents, transaction_type) VALUES (?, ?, ?, 'withdrawal');`,
-		create_new_ID(), payerID, amountCents,
+		newID(), payerID, amountCents,
 	); err != nil {
 		return fmt.Errorf("request fulfillment failed: unable to record withdrawal for payer '%s': %w", payerID, err)
 	}
 	if _, err = tx.Exec(
 		`INSERT INTO wallet_transactions (id, user_id, amount_cents, transaction_type) VALUES (?, ?, ?, 'deposit');`,
-		create_new_ID(), requesterID, amountCents,
+		newID(), requesterID, amountCents,
 	); err != nil {
 		return fmt.Errorf("request fulfillment failed: unable to record deposit for requester '%s': %w", requesterID, err)
 	}

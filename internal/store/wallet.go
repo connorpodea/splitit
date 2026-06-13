@@ -73,7 +73,7 @@ func (s *Store) Deposit(userID string, amountCents int) error {
 
 	_, err = transaction.Exec(
 		`INSERT INTO wallet_transactions (id, user_id, amount_cents, transaction_type) VALUES (?, ?, ?, 'deposit');`,
-		create_new_ID(), userID, amountCents,
+		newID(), userID, amountCents,
 	)
 	if err != nil {
 		return fmt.Errorf("deposit failed: unable to record wallet transaction for user '%s': %w", userID, err)
@@ -122,7 +122,7 @@ func (s *Store) Withdraw(userID string, amountCents int) error {
 
 	_, err = transaction.Exec(
 		`INSERT INTO wallet_transactions (id, user_id, amount_cents, transaction_type) VALUES (?, ?, ?, 'withdrawal');`,
-		create_new_ID(), userID, amountCents,
+		newID(), userID, amountCents,
 	)
 	if err != nil {
 		return fmt.Errorf("withdrawal failed: unable to record wallet transaction for user '%s': %w", userID, err)

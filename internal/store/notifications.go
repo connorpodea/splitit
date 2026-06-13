@@ -11,7 +11,7 @@ import (
 func (s *Store) CreateNotification(n *models.Notification) error {
 	// Generate a unique notification identifier inside the store so the client never controls primary keys
 	if n.ID == "" {
-		n.ID = create_new_ID()
+		n.ID = newID()
 	}
 
 	query := `

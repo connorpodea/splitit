@@ -15,7 +15,7 @@ func (s *Store) SendFriendRequest(request *models.FriendRequest) error {
 	VALUES (?,?,?);`
 
 	if request.ID == "" {
-		request.ID = create_new_ID()
+		request.ID = newID()
 	}
 	_, err := s.db.Exec(query, request.ID, request.SenderID, request.ReceiverID)
 	if err != nil {

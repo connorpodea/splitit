@@ -289,8 +289,8 @@ func (h *Handler) RemoveGroupMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract core verified profile constraints from active session data layers
-	_, authorized := h.authenticateSession(w, r)
+	// Bind the caller's identity from the session — the store will verify they are the group creator
+	callerID, authorized := h.authenticateSession(w, r)
 	if !authorized {
 		return
 	}
@@ -313,8 +313,8 @@ func (h *Handler) RemoveGroupMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Pass the group and target IDs to the store — the store enforces the rows-affected guard
-	err = h.store.RemoveGroupMember(input.GroupID, input.TargetUserID)
+	// Pass the caller identity so the store can enforce creator-only access
+	err = h.store.RemoveGroupMember(input.GroupID, input.TargetUserID, callerID)
 	if err != nil {
 		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": friendlyError(err)})
 		return

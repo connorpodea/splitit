@@ -52,9 +52,7 @@ func TestGetUnifiedActivity_ResponseContainsPeerColor(t *testing.T) {
 	}
 
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/payments/activity", nil)
-	req.AddCookie(&http.Cookie{Name: "session_user_id", Value: "alice"})
-	h.GetUnifiedActivity(rr, req)
+	h.GetUnifiedActivity(rr, sessionReq(t, h, http.MethodGet, "/payments/activity", "", "alice"))
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
@@ -101,7 +99,7 @@ func TestGetUnifiedActivity_PeerColorUpdatesAfterProfileChange(t *testing.T) {
 
 	// bob changes his profile color
 	rr := httptest.NewRecorder()
-	h.UpdateProfileColor(rr, sessionReq(t, http.MethodPost, "/users/update/color",
+	h.UpdateProfileColor(rr, sessionReq(t, h, http.MethodPost, "/users/update/color",
 		`{"color":"#c084fc"}`, "bob"))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("UpdateProfileColor: expected 200, got %d: %s", rr.Code, rr.Body.String())
@@ -109,9 +107,7 @@ func TestGetUnifiedActivity_PeerColorUpdatesAfterProfileChange(t *testing.T) {
 
 	// alice's feed should now reflect bob's new color
 	rr2 := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/payments/activity", nil)
-	req.AddCookie(&http.Cookie{Name: "session_user_id", Value: "alice"})
-	h.GetUnifiedActivity(rr2, req)
+	h.GetUnifiedActivity(rr2, sessionReq(t, h, http.MethodGet, "/payments/activity", "", "alice"))
 
 	if rr2.Code != http.StatusOK {
 		t.Fatalf("GetUnifiedActivity: expected 200, got %d", rr2.Code)
@@ -153,9 +149,7 @@ func TestGetUnifiedActivity_PeerColorNeverEmpty(t *testing.T) {
 	}
 
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/payments/activity", nil)
-	req.AddCookie(&http.Cookie{Name: "session_user_id", Value: "alice"})
-	h.GetUnifiedActivity(rr, req)
+	h.GetUnifiedActivity(rr, sessionReq(t, h, http.MethodGet, "/payments/activity", "", "alice"))
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rr.Code)

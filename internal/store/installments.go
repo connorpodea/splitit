@@ -19,7 +19,7 @@ func (s *Store) CreateBNPLLoan(payment *models.Payment) error {
 
 	// Generate the master loan ID in the store
 	if payment.ID == "" {
-		payment.ID = create_new_ID()
+		payment.ID = newID()
 	}
 
 	// Reject the loan if the requested amount exceeds the buyer's available credit limit
@@ -75,7 +75,7 @@ func (s *Store) CreateBNPLLoan(payment *models.Payment) error {
 	// Step 2: Pay the Merchant — the app treasury injects the full item price to the seller immediately
 	fundingPayment := &models.Payment{
 		ID:                fmt.Sprintf("fund_%s", payment.ID),
-		SenderID:          "app_treasury",
+		SenderID:          treasuryID,
 		ReceiverID:        payment.ReceiverID,
 		AmountCents:       itemPriceCents,
 		TotalAmountCents:  itemPriceCents,
@@ -94,7 +94,7 @@ func (s *Store) CreateBNPLLoan(payment *models.Payment) error {
 	downPayment := &models.Payment{
 		ID:                fmt.Sprintf("down_%s", payment.ID),
 		SenderID:          payment.SenderID,
-		ReceiverID:        "app_treasury",
+		ReceiverID:        treasuryID,
 		AmountCents:       baseAmountCents + remainderCents,
 		TotalAmountCents:  baseAmountCents + remainderCents,
 		PaymentType:       "installment",
@@ -213,7 +213,7 @@ func (s *Store) PayInstallment(installmentID, paymentID, userID string, amountCe
 	SET balance_cents = balance_cents + ?
 	WHERE id = ?;`
 
-	creditResult, err := transaction.Exec(creditQuery, amountCents, "app_treasury")
+	creditResult, err := transaction.Exec(creditQuery, amountCents, treasuryID)
 	if err != nil {
 		return fmt.Errorf("installment settlement failed: unable to credit %d cents to treasury: %w", amountCents, err)
 	}
@@ -225,13 +225,14 @@ func (s *Store) PayInstallment(installmentID, paymentID, userID string, amountCe
 		return fmt.Errorf("installment settlement rejected: treasury account not found in user registry")
 	}
 
-	// Mark the installment row as paid
+	// Mark the installment row as paid — AND user_id = ? ensures only the actual
+	// borrower can settle their own installment; third-party callers are rejected here.
 	markPaidQuery := `
 	UPDATE installments
 	SET is_paid = 1
-	WHERE id = ?;`
+	WHERE id = ? AND user_id = ?;`
 
-	markResult, err := transaction.Exec(markPaidQuery, installmentID)
+	markResult, err := transaction.Exec(markPaidQuery, installmentID, userID)
 	if err != nil {
 		return fmt.Errorf("installment settlement failed: unable to mark installment ID '%s' as paid: %w", installmentID, err)
 	}
@@ -240,7 +241,7 @@ func (s *Store) PayInstallment(installmentID, paymentID, userID string, amountCe
 		return fmt.Errorf("failed to read installment paid-state execution metrics: %w", err)
 	}
 	if markRows == 0 {
-		return fmt.Errorf("installment settlement rejected: installment ID '%s' not found in debt schedule registry", installmentID)
+		return fmt.Errorf("installment settlement rejected: installment ID '%s' not found or does not belong to user '%s'", installmentID, userID)
 	}
 
 	// Check if this installment was paid late and penalize the credit score accordingly
@@ -651,7 +652,7 @@ func (s *Store) ApplyMonthlyOverduePenalties() error {
 		INSERT INTO credit_score_log (id, user_id, score, delta)
 		VALUES (?, ?, ?, ?);`
 
-		if _, err = tx.Exec(logQuery, create_new_ID(), userID, newScore, -overdueScorePenalty); err != nil {
+		if _, err = tx.Exec(logQuery, newID(), userID, newScore, -overdueScorePenalty); err != nil {
 			return fmt.Errorf("failed to write overdue penalty audit event to credit score log for user '%s': %w", userID, err)
 		}
 

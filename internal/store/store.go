@@ -11,8 +11,10 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// create_new_ID generates a cryptographically random 24-character hex string for use as a primary key.
-func create_new_ID() string {
+const treasuryID = "app_treasury"
+
+// newID generates a cryptographically random 24-character hex string for use as a primary key.
+func newID() string {
 	b := make([]byte, 12)
 	rand.Read(b)
 	return hex.EncodeToString(b)

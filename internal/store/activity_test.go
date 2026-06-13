@@ -139,7 +139,7 @@ func TestListIncomingPaymentRequests_ExcludesAcceptedRequests(t *testing.T) {
 	if err := s.CreatePaymentRequest(req); err != nil {
 		t.Fatalf("CreatePaymentRequest: %v", err)
 	}
-	if err := s.UpdatePaymentRequestStatus(req.ID, "accepted"); err != nil {
+	if err := s.UpdatePaymentRequestStatus(req.ID, "accepted", "bob"); err != nil {
 		t.Fatalf("UpdatePaymentRequestStatus: %v", err)
 	}
 

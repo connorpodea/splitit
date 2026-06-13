@@ -41,12 +41,16 @@ func seedUser(t *testing.T, s *store.Store, id string, balanceCents int) {
 	}
 }
 
-// sessionReq builds a POST request with a JSON body and the session cookie set.
-func sessionReq(t *testing.T, method, path, body, userID string) *http.Request {
+// sessionReq builds an HTTP request with a real server-side session token for userID.
+func sessionReq(t *testing.T, h *handlers.Handler, method, path, body, userID string) *http.Request {
 	t.Helper()
+	token, err := h.CreateSession(userID)
+	if err != nil {
+		t.Fatalf("sessionReq: CreateSession: %v", err)
+	}
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	req.AddCookie(&http.Cookie{Name: "session_user_id", Value: userID})
+	req.AddCookie(&http.Cookie{Name: "session_token", Value: token})
 	return req
 }
 
@@ -58,7 +62,7 @@ func TestPay_ToUser_TransfersBalance(t *testing.T) {
 	seedUser(t, s, "bob", 0)
 
 	rr := httptest.NewRecorder()
-	h.Pay(rr, sessionReq(t, http.MethodPost, "/payments/pay",
+	h.Pay(rr, sessionReq(t, h, http.MethodPost, "/payments/pay",
 		`{"receiver_id":"bob","amount_cents":3000,"payment_type":"direct"}`, "alice"))
 
 	if rr.Code != http.StatusOK {
@@ -81,7 +85,7 @@ func TestPay_InsufficientBalance_ReturnsFriendlyError(t *testing.T) {
 	seedUser(t, s, "bob", 0)
 
 	rr := httptest.NewRecorder()
-	h.Pay(rr, sessionReq(t, http.MethodPost, "/payments/pay",
+	h.Pay(rr, sessionReq(t, h, http.MethodPost, "/payments/pay",
 		`{"receiver_id":"bob","amount_cents":1000,"payment_type":"direct"}`, "alice"))
 
 	if rr.Code != http.StatusBadRequest {
@@ -110,7 +114,7 @@ func TestCreatePaymentRequest_AppearInIncomingFeed(t *testing.T) {
 	seedUser(t, s, "bob", 0)
 
 	rr := httptest.NewRecorder()
-	h.CreatePaymentRequest(rr, sessionReq(t, http.MethodPost, "/payments/request/create",
+	h.CreatePaymentRequest(rr, sessionReq(t, h, http.MethodPost, "/payments/request/create",
 		`{"payer_id":"bob","amount_cents":2000}`, "alice"))
 
 	if rr.Code != http.StatusCreated {
@@ -150,7 +154,7 @@ func TestCreatePaymentRequest_ToGroup_CreatesRequestPerMember(t *testing.T) {
 	}
 
 	rr := httptest.NewRecorder()
-	h.CreatePaymentRequest(rr, sessionReq(t, http.MethodPost, "/payments/request/create",
+	h.CreatePaymentRequest(rr, sessionReq(t, h, http.MethodPost, "/payments/request/create",
 		`{"payer_id":"`+group.ID+`","amount_cents":9000}`, "alice"))
 
 	if rr.Code != http.StatusCreated {
@@ -177,7 +181,7 @@ func TestPay_ToUser_CreatesNotificationWithActivityLinkView(t *testing.T) {
 	seedUser(t, s, "bob", 0)
 
 	rr := httptest.NewRecorder()
-	h.Pay(rr, sessionReq(t, http.MethodPost, "/payments/pay",
+	h.Pay(rr, sessionReq(t, h, http.MethodPost, "/payments/pay",
 		`{"receiver_id":"bob","amount_cents":1000,"payment_type":"direct"}`, "alice"))
 
 	if rr.Code != http.StatusOK {
@@ -211,7 +215,7 @@ func TestFulfillPaymentRequest_TransfersFunds(t *testing.T) {
 	}
 
 	rr := httptest.NewRecorder()
-	h.FulfillPaymentRequest(rr, sessionReq(t, http.MethodPost, "/payments/request/fulfill",
+	h.FulfillPaymentRequest(rr, sessionReq(t, h, http.MethodPost, "/payments/request/fulfill",
 		`{"request_id":"`+req.ID+`"}`, "bob"))
 
 	if rr.Code != http.StatusOK {
@@ -239,7 +243,7 @@ func TestFulfillPaymentRequest_RejectsInsufficientBalance(t *testing.T) {
 	}
 
 	rr := httptest.NewRecorder()
-	h.FulfillPaymentRequest(rr, sessionReq(t, http.MethodPost, "/payments/request/fulfill",
+	h.FulfillPaymentRequest(rr, sessionReq(t, h, http.MethodPost, "/payments/request/fulfill",
 		`{"request_id":"`+req.ID+`"}`, "bob"))
 
 	if rr.Code != http.StatusBadRequest {
@@ -269,7 +273,7 @@ func TestGetUnifiedActivity_ReturnsFeedItems(t *testing.T) {
 	}
 
 	rr := httptest.NewRecorder()
-	h.GetUnifiedActivity(rr, sessionReq(t, http.MethodGet, "/payments/activity", "", "alice"))
+	h.GetUnifiedActivity(rr, sessionReq(t, h, http.MethodGet, "/payments/activity", "", "alice"))
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
@@ -299,7 +303,7 @@ func TestUpdateProfileColor_PersistsColor(t *testing.T) {
 	seedUser(t, s, "alice", 0)
 
 	rr := httptest.NewRecorder()
-	h.UpdateProfileColor(rr, sessionReq(t, http.MethodPost, "/users/update/color",
+	h.UpdateProfileColor(rr, sessionReq(t, h, http.MethodPost, "/users/update/color",
 		`{"color":"#fb7185"}`, "alice"))
 
 	if rr.Code != http.StatusOK {
