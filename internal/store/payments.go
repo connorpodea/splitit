@@ -8,109 +8,81 @@ import (
 	"github.com/connorpodea/splitit/internal/models"
 )
 
-// Pay executes a direct peer-to-peer payment: verifies the sender has sufficient funds,
-// deducts the sender's balance, credits the receiver, records the transaction, and
-// dispatches a payment notification — all within a single atomic database transaction.
-func (s *Store) Pay(payment *models.Payment) error {
-	// Generate a unique transaction identifier inside the store so the client never controls primary keys
+// transfer executes a balance move + payment record + wallet entries within an existing tx.
+// It is the shared primitive used by Pay, CreateBNPLLoan, and FulfillPaymentRequest so
+// every multi-step financial operation can wrap multiple transfers in a single outer tx.
+func (s *Store) transfer(tx *sql.Tx, payment *models.Payment) error {
 	if payment.ID == "" {
 		payment.ID = newID()
 	}
 
-	transaction, err := s.db.Begin()
+	var balance int
+	if err := tx.QueryRow(`SELECT balance_cents FROM users WHERE id = ?;`, payment.SenderID).Scan(&balance); err != nil {
+		return fmt.Errorf("unable to verify sender funds for '%s': %w", payment.SenderID, err)
+	}
+	if balance < payment.AmountCents {
+		return fmt.Errorf("insufficient liquid funds: sender '%s' has %d cents, payment requires %d cents", payment.SenderID, balance, payment.AmountCents)
+	}
+
+	res, err := tx.Exec(`UPDATE users SET balance_cents = balance_cents - ? WHERE id = ?;`, payment.AmountCents, payment.SenderID)
 	if err != nil {
-		return fmt.Errorf("ledger settlement aborted: failed to open transaction session context: %w", err)
+		return fmt.Errorf("failed to deduct %d cents from sender '%s': %w", payment.AmountCents, payment.SenderID, err)
 	}
-	// If the function exits early due to an error, discard all changes
-	defer transaction.Rollback()
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("sender account '%s' not found", payment.SenderID)
+	}
 
-	// Block the sender from going into negative balance
-	var currentBalanceCents int
-	balanceQuery := `
-	SELECT balance_cents
-	FROM users
-	WHERE id = ?;`
-	err = transaction.QueryRow(balanceQuery, payment.SenderID).Scan(&currentBalanceCents)
+	res, err = tx.Exec(`UPDATE users SET balance_cents = balance_cents + ? WHERE id = ?;`, payment.TotalAmountCents, payment.ReceiverID)
 	if err != nil {
-		return fmt.Errorf("ledger settlement failed: unable to verify sender funds: %w", err)
+		return fmt.Errorf("failed to credit %d cents to receiver '%s': %w", payment.TotalAmountCents, payment.ReceiverID, err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("receiver account '%s' not found", payment.ReceiverID)
 	}
 
-	if currentBalanceCents < payment.AmountCents {
-		return fmt.Errorf("ledger settlement rejected: insufficient liquid funds (ID: '%s' attempted to pay %d cents but only has %d cents)", payment.SenderID, payment.AmountCents, currentBalanceCents)
-	}
-
-	// Update the senders balance to deduct the upfront payment
-	query := `
-	UPDATE users
-	SET balance_cents = balance_cents - ?
-	WHERE id = ?;`
-
-	result, err := transaction.Exec(query, payment.AmountCents, payment.SenderID)
+	_, err = tx.Exec(
+		`INSERT INTO payments (id, sender_id, receiver_id, amount_cents, total_amount_cents, note, payment_type, total_installments, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+		payment.ID, payment.SenderID, payment.ReceiverID, payment.AmountCents, payment.TotalAmountCents, payment.Note, payment.PaymentType, payment.TotalInstallments, payment.Status,
+	)
 	if err != nil {
-		return fmt.Errorf("ledger settlement failed: unable to clear balance deduction of %d cents from sender ID '%s': %w", payment.AmountCents, payment.SenderID, err)
-	}
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("failed to read sender deduction execution state metrics: %w", err)
-	}
-	if rowsAffected == 0 {
-		return fmt.Errorf("ledger settlement rejected: sender account ID '%s' not found in user registry", payment.SenderID)
+		return fmt.Errorf("failed to record payment '%s': %w", payment.ID, err)
 	}
 
-	// Update receivers balance to receive the total payment
-	query = `
-	UPDATE users
-	SET balance_cents = balance_cents + ?
-	WHERE id = ?;`
-
-	result, err = transaction.Exec(query, payment.TotalAmountCents, payment.ReceiverID)
-	if err != nil {
-		return fmt.Errorf("ledger settlement failed: unable to credit balance allocation of %d cents to receiver ID '%s': %w", payment.TotalAmountCents, payment.ReceiverID, err)
-	}
-	rowsAffected, err = result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("failed to read receiver credit execution state metrics: %w", err)
-	}
-	if rowsAffected == 0 {
-		return fmt.Errorf("ledger settlement rejected: receiver account ID '%s' not found in user registry", payment.ReceiverID)
-	}
-
-	// Create a new row in the senders payment table
-	query = `
-	INSERT INTO payments
-	(id, sender_id, receiver_id, amount_cents, total_amount_cents, note, payment_type, total_installments, status)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`
-
-	_, err = transaction.Exec(query, payment.ID, payment.SenderID, payment.ReceiverID, payment.AmountCents, payment.TotalAmountCents, payment.Note, payment.PaymentType, payment.TotalInstallments, payment.Status)
-	if err != nil {
-		return fmt.Errorf("ledger settlement failed: historical transaction entry creation with ID '%s' rejected by database: %w", payment.ID, err)
-	}
-
-	// Record wallet activity for real users only (skip app_treasury internal transfers)
+	// Wallet activity is only recorded for real users — treasury internal transfers are excluded.
 	if payment.SenderID != treasuryID {
-		_, err = transaction.Exec(
-			`INSERT INTO wallet_transactions (id, user_id, amount_cents, transaction_type) VALUES (?, ?, ?, 'withdrawal');`,
-			newID(), payment.SenderID, payment.AmountCents,
-		)
-		if err != nil {
-			return fmt.Errorf("ledger settlement failed: unable to record withdrawal for sender '%s': %w", payment.SenderID, err)
+		if _, err = tx.Exec(`INSERT INTO wallet_transactions (id, user_id, amount_cents, transaction_type) VALUES (?, ?, ?, 'withdrawal');`, newID(), payment.SenderID, payment.AmountCents); err != nil {
+			return fmt.Errorf("failed to record withdrawal for sender '%s': %w", payment.SenderID, err)
 		}
 	}
 	if payment.ReceiverID != treasuryID {
-		_, err = transaction.Exec(
-			`INSERT INTO wallet_transactions (id, user_id, amount_cents, transaction_type) VALUES (?, ?, ?, 'deposit');`,
-			newID(), payment.ReceiverID, payment.TotalAmountCents,
-		)
-		if err != nil {
-			return fmt.Errorf("ledger settlement failed: unable to record deposit for receiver '%s': %w", payment.ReceiverID, err)
+		if _, err = tx.Exec(`INSERT INTO wallet_transactions (id, user_id, amount_cents, transaction_type) VALUES (?, ?, ?, 'deposit');`, newID(), payment.ReceiverID, payment.TotalAmountCents); err != nil {
+			return fmt.Errorf("failed to record deposit for receiver '%s': %w", payment.ReceiverID, err)
 		}
 	}
+	return nil
+}
 
-	if err = transaction.Commit(); err != nil {
-		return fmt.Errorf("critical engine tracking mismatch: failed to write block modifications to disk on final commit sequence: %w", err)
+// Pay executes a direct peer-to-peer payment: verifies funds, moves the balance, records
+// the transaction, and dispatches a notification — all within a single atomic transaction.
+func (s *Store) Pay(payment *models.Payment) error {
+	if payment.ID == "" {
+		payment.ID = newID()
 	}
 
-	// Dispatch the notification in a goroutine so it doesn't block the payment response
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("ledger settlement aborted: failed to open transaction context: %w", err)
+	}
+	defer tx.Rollback()
+
+	if err = s.transfer(tx, payment); err != nil {
+		return fmt.Errorf("ledger settlement failed: %w", err)
+	}
+
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("ledger settlement aborted: failed to commit: %w", err)
+	}
+
 	go s.CreateNotification(&models.Notification{
 		UserID:   payment.ReceiverID,
 		Type:     "payment_received",
@@ -205,7 +177,7 @@ func (s *Store) ListPaymentsSent(userID string) ([]models.Payment, error) {
 
 	rows, err := s.db.Query(query, userID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to look up inbound payment history ledger for user ID '%s': %w", userID, err)
+		return nil, fmt.Errorf("failed to look up outbound payment history ledger for user ID '%s': %w", userID, err)
 	}
 	defer rows.Close()
 

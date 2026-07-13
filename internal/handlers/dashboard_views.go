@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"fmt"
-	"html"
 	"html/template"
 	"strings"
 
@@ -28,7 +27,8 @@ func viewHome(name string, user *models.User, overdueInstallments []models.Insta
 		}
 	}
 	activeSplits := len(splitIDs)
-	recentRows := ""
+
+	var rowsBuf strings.Builder
 	count := 0
 	for _, req := range incomingRequests {
 		if count >= 5 {
@@ -42,7 +42,14 @@ func viewHome(name string, user *models.User, overdueInstallments []models.Insta
 		if len(date) >= 10 {
 			date = date[:10]
 		}
-		recentRows += `<div class="row"><div class="row-avatar" style="background:#4ade80;color:#fff">` + html.EscapeString(ini) + `</div><div class="row-body"><div class="row-title"><b>@` + html.EscapeString(req.RequesterID) + `</b> requested from <b>you</b></div><div class="row-sub">` + html.EscapeString(req.Note) + `</div></div><div class="row-right"><div class="row-amt req mono">$` + fmt.Sprintf("%d.%02d", req.AmountCents/100, req.AmountCents%100) + `</div><div class="row-time">` + date + `</div></div></div>`
+		rowsBuf.WriteString(renderTmpl(homeRequestRowTmpl, homeRequestRowData{
+			Color:       "#4ade80",
+			Initials:    ini,
+			RequesterID: req.RequesterID,
+			Note:        req.Note,
+			Amount:      fmt.Sprintf("$%d.%02d", req.AmountCents/100, req.AmountCents%100),
+			Date:        date,
+		}))
 		count++
 	}
 	for _, inst := range installments {
@@ -67,15 +74,23 @@ func viewHome(name string, user *models.User, overdueInstallments []models.Insta
 		if inst.Note != "" {
 			sub = inst.Note + " · " + statusLabel
 		}
-		recentRows += `<div class="row"><div class="row-avatar" style="background:` + peerColor + `;color:#fff">BN</div><div class="row-body"><div class="row-title"><b>BNPL</b> to <b>` + html.EscapeString(peerLabel) + `</b> <span class="pill">Pay-in-4</span></div><div class="row-sub">` + html.EscapeString(sub) + `</div></div><div class="row-right"><div class="row-amt ` + amtClass + ` mono">$` + fmt.Sprintf("%d.%02d", inst.AmountCents/100, inst.AmountCents%100) + `</div><div class="row-time">` + inst.DueDate + `</div></div></div>`
+		rowsBuf.WriteString(renderTmpl(homeBNPLRowTmpl, homeBNPLRowData{
+			Color:    peerColor,
+			PeerName: peerLabel,
+			Sub:      sub,
+			AmtClass: amtClass,
+			Amount:   fmt.Sprintf("$%d.%02d", inst.AmountCents/100, inst.AmountCents%100),
+			Date:     inst.DueDate,
+		}))
 		count++
 	}
+	recentRows := rowsBuf.String()
 	if recentRows == "" {
 		recentRows = `<div style="text-align:center;padding:28px 16px;color:var(--text-mute);font-size:13px;">No recent activity yet.</div>`
 	}
 	return `
 <section class="view active" data-view="home">
-  <div class="greeting" style="font-size:14px;color:var(--text-mute);margin-bottom:14px;">Welcome back, <b style="color:var(--text);">` + html.EscapeString(greet) + `</b></div>
+  <div class="greeting" style="font-size:14px;color:var(--text-mute);margin-bottom:14px;">Welcome back, <b style="color:var(--text);">` + template.HTMLEscapeString(greet) + `</b></div>
   <div class="hero">
     <div class="hero-label">Available balance</div>
     <div class="hero-amount mono">$` + fmt.Sprintf("%d", balanceWhole) + `<span class="cents">.` + fmt.Sprintf("%02d", balanceCentsFrac) + `</span></div>
@@ -108,7 +123,7 @@ func viewActivity(installments []models.InstallmentDetail, overdueInstallments [
 		overdueIDs[inst.ID] = true
 	}
 
-	activeRows := ""
+	var activeBuf strings.Builder
 	for _, inst := range installments {
 		if inst.IsPaid || overdueIDs[inst.ID] {
 			continue
@@ -125,8 +140,14 @@ func viewActivity(installments []models.InstallmentDetail, overdueInstallments [
 		if inst.Note != "" {
 			sub = inst.Note + " · Due " + inst.DueDate
 		}
-		activeRows += `<div class="row"><div class="row-avatar" style="background:` + peerColor + `;color:#fff">BN</div><div class="row-body"><div class="row-title"><b>BNPL</b> to <b>` + html.EscapeString(peerLabel) + `</b> <span class="pill">Pay-in-4</span></div><div class="row-sub">` + html.EscapeString(sub) + `</div><div class="progress"><span style="width:50%;"></span></div></div><div class="row-right"><div class="row-amt bnpl mono">$` + fmt.Sprintf("%d.%02d", inst.AmountCents/100, inst.AmountCents%100) + `</div><div class="row-time">/installment</div></div></div>`
+		activeBuf.WriteString(renderTmpl(activityBNPLActiveRowTmpl, activityBNPLActiveRowData{
+			Color:    peerColor,
+			PeerName: peerLabel,
+			Sub:      sub,
+			Amount:   fmt.Sprintf("$%d.%02d", inst.AmountCents/100, inst.AmountCents%100),
+		}))
 	}
+	activeRows := activeBuf.String()
 	if activeRows == "" {
 		activeRows = `<div style="text-align:center;padding:28px 16px;color:var(--text-mute);font-size:13px;">No active BNPL plans.</div>`
 	}
@@ -143,7 +164,7 @@ func viewActivity(installments []models.InstallmentDetail, overdueInstallments [
 		for _, inst := range overdueInstallments {
 			overdueTotalCents += inst.AmountCents
 		}
-		overdueRows := ""
+		var overdueBuf strings.Builder
 		for _, inst := range overdueInstallments {
 			peerColor := inst.PeerColor
 			if peerColor == "" {
@@ -157,12 +178,20 @@ func viewActivity(installments []models.InstallmentDetail, overdueInstallments [
 			if inst.Note != "" {
 				sub = inst.Note + " · Due " + inst.DueDate
 			}
-			overdueRows += `<div class="row overdue-row" data-installment-id="` + inst.ID + `" data-payment-id="` + inst.PaymentID + `" data-amount-cents="` + fmt.Sprintf("%d", inst.AmountCents) + `"><div class="row-avatar" style="background:` + peerColor + `;color:#fff">OD</div><div class="row-body"><div class="row-title"><b>BNPL</b> to <b>` + html.EscapeString(peerLabel) + `</b> <span class="pill warn">Overdue</span></div><div class="row-sub">` + html.EscapeString(sub) + `</div><div class="progress warn"><span style="width:25%;"></span></div></div><div class="row-right"><button onclick="payInstallment('` + inst.ID + `','` + inst.PaymentID + `',` + fmt.Sprintf("%d", inst.AmountCents) + `)" style="background:var(--rose);color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">Pay $` + fmt.Sprintf("%d.%02d", inst.AmountCents/100, inst.AmountCents%100) + `</button></div></div>`
+			overdueBuf.WriteString(renderTmpl(activityBNPLOverdueRowTmpl, activityBNPLOverdueRowData{
+				Color:         peerColor,
+				PeerName:      peerLabel,
+				Sub:           sub,
+				InstallmentID: inst.ID,
+				PaymentID:     inst.PaymentID,
+				AmountCents:   inst.AmountCents,
+				Amount:        fmt.Sprintf("$%d.%02d", inst.AmountCents/100, inst.AmountCents%100),
+			}))
 		}
-		overdueContent = `<div class="overdue-banner"><svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg><div class="ob-text"><strong>$` + fmt.Sprintf("%d.%02d", overdueTotalCents/100, overdueTotalCents%100) + ` overdue across ` + fmt.Sprintf("%d", len(overdueInstallments)) + ` bills</strong><div>Late fees may apply. Pay now to keep your Splitit Score intact.</div></div><button onclick="payAllOverdue()">Pay all</button></div><div class="card">` + overdueRows + `</div>`
+		overdueContent = `<div class="overdue-banner"><svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg><div class="ob-text"><strong>$` + fmt.Sprintf("%d.%02d", overdueTotalCents/100, overdueTotalCents%100) + ` overdue across ` + fmt.Sprintf("%d", len(overdueInstallments)) + ` bills</strong><div>Late fees may apply. Pay now to keep your Splitit Score intact.</div></div><button onclick="payAllOverdue()">Pay all</button></div><div class="card">` + overdueBuf.String() + `</div>`
 	}
 
-	feedRows := ""
+	var feedBuf strings.Builder
 	for _, item := range activityFeed {
 		amt := fmt.Sprintf("%d.%02d", item.AmountCents/100, item.AmountCents%100)
 		peerName := item.PeerName
@@ -185,54 +214,67 @@ func viewActivity(installments []models.InstallmentDetail, overdueInstallments [
 			date = date[:16]
 		}
 		date = strings.ReplaceAll(date, "T", " ")
-		safePeerName := html.EscapeString(peerName)
-		safeIni := html.EscapeString(ini)
-		var amtCls, prefix, title, extra string
+		escapedName := template.HTMLEscapeString(peerName)
+		var amtCls, prefix string
+		var title template.HTML
+		var extraHTML template.HTML
 		switch item.Kind {
 		case "payment_sent":
 			amtCls, prefix = "neg", "−"
-			title = "You paid <b>" + safePeerName + "</b>"
+			title = template.HTML("You paid <b>" + escapedName + "</b>")
 		case "payment_received":
 			amtCls, prefix = "pos", "+"
-			title = "<b>" + safePeerName + "</b> paid you"
+			title = template.HTML("<b>" + escapedName + "</b> paid you")
 		case "request_sent":
 			amtCls, prefix = "req", ""
-			title = "You requested from <b>" + safePeerName + "</b>"
+			title = template.HTML("You requested from <b>" + escapedName + "</b>")
 		case "request_received":
 			amtCls, prefix = "req", ""
-			title = "<b>" + safePeerName + "</b> requested"
+			title = template.HTML("<b>" + escapedName + "</b> requested")
 			if item.Status == "pending" {
-				extra = `<button onclick="payRequest('` + item.ID + `')" style="background:var(--indigo);color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;margin-bottom:4px;">Pay It</button>`
+				extraHTML = template.HTML(renderTmpl(payRequestBtnTmpl, payRequestBtnData{RequestID: item.ID}))
 			}
 		case "installment_due":
 			amtCls, prefix = "bnpl", ""
-			title = "BNPL to <b>" + safePeerName + "</b>"
-			extra = `<button onclick="payInstallment('` + item.ID + `','` + item.PaymentID + `',` + fmt.Sprintf("%d", item.AmountCents) + `)" style="background:var(--indigo);color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;margin-bottom:4px;">Pay Off</button>`
+			title = template.HTML("BNPL to <b>" + escapedName + "</b>")
+			extraHTML = template.HTML(renderTmpl(payInstallmentBtnTmpl, payInstallmentBtnData{
+				InstallmentID: item.ID,
+				PaymentID:     item.PaymentID,
+				AmountCents:   item.AmountCents,
+			}))
 		default:
-			amtCls, prefix, title = "", "", html.EscapeString(item.Kind)
+			amtCls, prefix = "", ""
+			title = template.HTML(template.HTMLEscapeString(item.Kind))
 		}
 		amtStr := "$" + amt
 		if prefix != "" {
 			amtStr = prefix + amtStr
 		}
-		safeStatus := html.EscapeString(item.Status)
 		statusSuffix := ""
 		if item.Status != "" && item.Status != "completed" {
-			statusSuffix = " · " + safeStatus
+			statusSuffix = " · " + item.Status
 		}
 		var sub string
 		if item.Note == "" {
-			sub = safeStatus + " · " + date
+			sub = item.Status + " · " + date
 		} else {
-			sub = html.EscapeString(item.Note) + statusSuffix + " · " + date
+			sub = item.Note + statusSuffix + " · " + date
 		}
-		feedRows += `<div class="row"><div class="row-avatar" style="background:` + avColor + `;color:#fff">` + safeIni + `</div><div class="row-body"><div class="row-title">` + title + `</div><div class="row-sub">` + sub + `</div></div><div class="row-right">` + extra + `<div class="row-amt ` + amtCls + ` mono">` + amtStr + `</div></div></div>`
+		feedBuf.WriteString(renderTmpl(activityFeedRowTmpl, activityFeedRowData{
+			Color:     avColor,
+			Initials:  ini,
+			Title:     title,
+			Sub:       sub,
+			ExtraHTML: extraHTML,
+			AmtClass:  amtCls,
+			AmtStr:    amtStr,
+		}))
 	}
 	var feedContent string
-	if feedRows == "" {
+	if feedBuf.Len() == 0 {
 		feedContent = `<div style="text-align:center;padding:28px 16px;color:var(--text-mute);font-size:13px;">No activity yet.</div>`
 	} else {
-		feedContent = `<div class="card">` + feedRows + `</div>`
+		feedContent = `<div class="card">` + feedBuf.String() + `</div>`
 	}
 
 	return `
@@ -252,29 +294,21 @@ func viewActivity(installments []models.InstallmentDetail, overdueInstallments [
 // ---- view: Groups -------------------------------------------------------------
 
 func viewGroups(groups []models.Group, groupInvitations []models.GroupInvitation, userID string, memberCounts map[string]int) string {
-	// Pending invitations — shown as an action surface so users arriving from the
-	// Notification Center can accept or decline without a separate page.
 	invitesSection := ""
 	if len(groupInvitations) > 0 {
-		rows := ""
+		var invBuf strings.Builder
 		for _, inv := range groupInvitations {
 			date := inv.CreatedAt
 			if len(date) >= 10 {
 				date = date[:10]
 			}
-			rows += `<div style="display:flex;align-items:center;gap:12px;padding:12px 14px;border-bottom:1px solid var(--border-soft);" data-invite-id="` + inv.ID + `">
-        <div class="row-avatar" style="background:var(--surface-3);color:var(--text-dim)"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></div>
-        <div style="flex:1;min-width:0;">
-          <div style="font-size:14px;font-weight:600;color:var(--text);">Group invitation</div>
-          <div style="font-size:12px;color:var(--text-faint);">from @` + html.EscapeString(inv.SenderID) + ` · ` + date + `</div>
-        </div>
-        <div style="display:flex;gap:6px;">
-          <button onclick="acceptGroupInvitation('` + inv.ID + `')" style="background:var(--emerald);color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">Join</button>
-          <button onclick="declineGroupInvitation('` + inv.ID + `')" style="background:var(--surface-3);color:var(--text-dim);border:1px solid var(--border);border-radius:8px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">Decline</button>
-        </div>
-      </div>`
+			invBuf.WriteString(renderTmpl(groupInviteRowTmpl, groupInviteRowData{
+				InviteID: inv.ID,
+				SenderID: inv.SenderID,
+				Date:     date,
+			}))
 		}
-		invitesSection = `<div style="margin-bottom:16px;"><div style="font-size:11px;font-weight:700;color:var(--text-mute);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px;">Pending invitations</div><div class="card">` + rows + `</div></div>`
+		invitesSection = `<div style="margin-bottom:16px;"><div style="font-size:11px;font-weight:700;color:var(--text-mute);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px;">Pending invitations</div><div class="card">` + invBuf.String() + `</div></div>`
 	}
 
 	groupsContent := ""
@@ -282,7 +316,7 @@ func viewGroups(groups []models.Group, groupInvitations []models.GroupInvitation
 		groupsContent = `<div class="empty"><div class="empty-icon"><svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></div><div class="empty-title">No groups yet</div><div class="empty-sub">Create a group to split bills and manage shared expenses with multiple people.</div><button onclick="openSheet('create-group')">Create your first group</button></div>`
 	} else {
 		hexPalette := []string{"#c084fc", "#22d3ee", "#4ade80", "#facc15", "#fb7185", "#db2777"}
-		rows := ""
+		var groupsBuf strings.Builder
 		for i, g := range groups {
 			hex := hexPalette[i%len(hexPalette)]
 			ini := ""
@@ -292,33 +326,21 @@ func viewGroups(groups []models.Group, groupInvitations []models.GroupInvitation
 			} else if len(runes) == 1 {
 				ini = strings.ToUpper(string(runes[0]))
 			}
-			isCreator := g.CreatorID == userID
-			creatorTag := ""
-			if isCreator {
-				creatorTag = ` <span style="font-size:10px;background:var(--indigo-soft);color:var(--indigo-hi);padding:2px 6px;border-radius:4px;font-weight:700;">CREATOR</span>`
-			}
 			count := memberCounts[g.ID]
 			memberText := fmt.Sprintf("%d member", count)
 			if count != 1 {
 				memberText += "s"
 			}
-			rows += `<div class="group-row" data-group-id="` + g.ID + `">
-        <div class="row-avatar" style="background:` + hex + `;color:#fff">` + html.EscapeString(ini) + `</div>
-        <div class="row-body" style="flex:1;min-width:0;cursor:pointer;" onclick="goGroupDetail('` + g.ID + `','` + template.JSEscapeString(g.Name) + `')">
-          <div class="row-title"><b>` + html.EscapeString(g.Name) + `</b>` + creatorTag + `</div>
-          <div class="row-sub" id="gmembers-` + g.ID + `">` + memberText + `</div>
-        </div>
-        <div class="friend-actions">
-          <button title="Invite member" onclick="openInviteSheet('` + g.ID + `','` + template.JSEscapeString(g.Name) + `')">
-            <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
-          </button>
-          <button class="remove" title="Leave group" onclick="confirmLeaveGroup('` + g.ID + `','` + template.JSEscapeString(g.Name) + `')">
-            <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-          </button>
-        </div>
-      </div>`
+			groupsBuf.WriteString(renderTmpl(groupListRowTmpl, groupListRowData{
+				GroupID:    g.ID,
+				Color:      hex,
+				Initials:   ini,
+				Name:       g.Name,
+				IsCreator:  g.CreatorID == userID,
+				MemberText: memberText,
+			}))
 		}
-		groupsContent = `<div class="card" id="groups-list">` + rows + `</div>`
+		groupsContent = `<div class="card" id="groups-list">` + groupsBuf.String() + `</div>`
 	}
 
 	return `
@@ -383,7 +405,7 @@ func viewWallet(user *models.User, w *walletDashboard) string {
 	if len(w.Transactions) == 0 {
 		txnsHTML = `<div style="text-align:center;padding:24px;color:var(--text-mute);font-size:13px;">No wallet transactions yet.</div>`
 	} else {
-		txnRows := ""
+		var txnBuf strings.Builder
 		for i, t := range w.Transactions {
 			if i >= 30 {
 				break
@@ -399,13 +421,18 @@ func viewWallet(user *models.User, w *walletDashboard) string {
 			if len(date) > 10 {
 				date = date[:10]
 			}
-			txnRows += `<div class="row">` +
-				`<div class="row-avatar" style="background:var(--surface-3);color:var(--text-dim);font-size:16px;">` + arrow + `</div>` +
-				`<div class="row-body"><div class="row-title"><b>` + lbl + `</b><span class="dir-badge ` + dc + `">` + dl + `</span></div>` +
-				`<div class="row-sub">` + date + `</div></div>` +
-				`<div class="row-right"><div class="row-amt ` + amtCls + ` mono">` + pfx + `$` + fmt.Sprintf("%d.%02d", t.AmountCents/100, t.AmountCents%100) + `</div></div></div>`
+			txnBuf.WriteString(renderTmpl(walletTxnRowTmpl, walletTxnRowData{
+				Arrow:    arrow,
+				Label:    lbl,
+				DirClass: dc,
+				DirLabel: dl,
+				Date:     date,
+				AmtClass: amtCls,
+				Prefix:   pfx,
+				Amount:   fmt.Sprintf("$%d.%02d", t.AmountCents/100, t.AmountCents%100),
+			}))
 		}
-		txnsHTML = `<div class="card">` + txnRows + `</div>`
+		txnsHTML = `<div class="card">` + txnBuf.String() + `</div>`
 	}
 
 	return `
@@ -445,7 +472,7 @@ func viewAnalytics(a *analyticsDashboard) string {
 	if len(a.Recipients) == 0 {
 		rHTML += `<div style="color:var(--text-mute);font-size:13px;padding:12px 0;">No payment data yet.</div>`
 	} else {
-		rows := ""
+		var recipBuf strings.Builder
 		for i, r := range a.Recipients {
 			dn := r.Profile.Name
 			if dn == "" {
@@ -459,11 +486,15 @@ func viewAnalytics(a *analyticsDashboard) string {
 			if avColor == "" {
 				avColor = hexPalette[i%len(hexPalette)]
 			}
-			rows += `<div class="row"><div class="row-avatar" style="background:` + avColor + `;color:#fff">` + html.EscapeString(ini) + `</div>` +
-				`<div class="row-body"><div class="row-title"><b>` + html.EscapeString(dn) + `</b></div><div class="row-sub">@` + html.EscapeString(r.Profile.ID) + `</div></div>` +
-				`<div class="row-right"><div class="row-amt neg mono">−$` + fmt.Sprintf("%d", r.TotalSentCents/100) + `</div><div class="row-time">sent</div></div></div>`
+			recipBuf.WriteString(renderTmpl(analyticsRecipientRowTmpl, analyticsRecipientRowData{
+				Color:     avColor,
+				Initials:  ini,
+				Name:      dn,
+				Handle:    r.Profile.ID,
+				TotalSent: fmt.Sprintf("$%d", r.TotalSentCents/100),
+			}))
 		}
-		rHTML += `<div class="card">` + rows + `</div>`
+		rHTML += `<div class="card">` + recipBuf.String() + `</div>`
 	}
 
 	sentCents, recvCents, bnplCents := 0, 0, 0
@@ -483,31 +514,28 @@ func viewAnalytics(a *analyticsDashboard) string {
 	if len(a.CreditHistory) == 0 {
 		cHTML += `<div style="color:var(--text-mute);font-size:13px;padding:12px 0;">No score history yet.</div>`
 	} else {
-		rows := ""
+		var creditBuf strings.Builder
 		for i, e := range a.CreditHistory {
 			if i >= 12 {
 				break
 			}
 			isPos := e.Delta >= 0
 			date := e.CreatedAt.Format("2006-01-02")
-			var avStyle, amtCls, deltaStr, arrow string
+			amtCls := "neg"
+			deltaStr := fmt.Sprintf("%d", e.Delta)
 			if isPos {
-				avStyle = "background:var(--emerald-soft);color:var(--emerald-hi);font-size:14px;"
 				amtCls = "pos"
 				deltaStr = "+" + fmt.Sprintf("%d", e.Delta)
-				arrow = "▲"
-			} else {
-				avStyle = "background:var(--rose-soft);color:var(--rose-hi);font-size:14px;"
-				amtCls = "neg"
-				deltaStr = fmt.Sprintf("%d", e.Delta)
-				arrow = "▼"
 			}
-			rows += `<div class="row">` +
-				`<div class="row-avatar" style="` + avStyle + `">` + arrow + `</div>` +
-				`<div class="row-body"><div class="row-title"><b>Score adjustment</b></div><div class="row-sub">New score: ` + fmt.Sprintf("%d", e.Score) + `</div></div>` +
-				`<div class="row-right"><div class="row-amt ` + amtCls + ` mono">` + deltaStr + `</div><div class="row-time">` + date + `</div></div></div>`
+			creditBuf.WriteString(renderTmpl(analyticsCreditRowTmpl, analyticsCreditRowData{
+				IsPositive: isPos,
+				AmtClass:   amtCls,
+				DeltaStr:   deltaStr,
+				Score:      e.Score,
+				Date:       date,
+			}))
 		}
-		cHTML += `<div class="card">` + rows + `</div>`
+		cHTML += `<div class="card">` + creditBuf.String() + `</div>`
 	}
 
 	return `
@@ -539,14 +567,15 @@ func viewSettings(user *models.User, settings *models.UserSettings) string {
 		{"#facc15", "Mustard Gold"}, {"#c084fc", "Bright Lavender"}, {"#f97316", "Tangerine"},
 		{"#e11d48", "Crimson"}, {"#db2777", "Magenta"},
 	}
-	swatches := ""
+	var swatchBuf strings.Builder
 	for _, c := range palette {
-		ring := ""
-		if c.hex == profileColor {
-			ring = "box-shadow:0 0 0 3px var(--surface),0 0 0 5px " + c.hex + ";"
-		}
-		swatches += `<button class="color-swatch" data-color="` + c.hex + `" onclick="submitUpdateColor('` + c.hex + `')" style="width:32px;height:32px;border-radius:50%;border:none;cursor:pointer;transition:transform .15s;background:` + c.hex + `;` + ring + `" title="` + c.label + `"></button>`
+		swatchBuf.WriteString(renderTmpl(colorSwatchTmpl, colorSwatchData{
+			Hex:      c.hex,
+			Label:    c.label,
+			Selected: c.hex == profileColor,
+		}))
 	}
+	swatches := swatchBuf.String()
 
 	emailChecked := "checked"
 	discChecked := "checked"
@@ -574,21 +603,21 @@ func viewSettings(user *models.User, settings *models.UserSettings) string {
       <div>
         <label class="modal-lbl">Display name</label>
         <div style="display:flex;gap:8px;">
-          <input class="modal-inp" id="settings-name" value="` + html.EscapeString(name) + `" placeholder="Your name" />
+          <input class="modal-inp" id="settings-name" value="` + template.HTMLEscapeString(name) + `" placeholder="Your name" />
           <button onclick="submitUpdateField('name',document.getElementById('settings-name').value,'name')" style="background:var(--indigo);color:#fff;border:none;border-radius:10px;padding:0 16px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap;">Save</button>
         </div>
       </div>
       <div>
         <label class="modal-lbl">Email</label>
         <div style="display:flex;gap:8px;">
-          <input class="modal-inp" id="settings-email" type="email" value="` + html.EscapeString(email) + `" placeholder="email@example.com" />
+          <input class="modal-inp" id="settings-email" type="email" value="` + template.HTMLEscapeString(email) + `" placeholder="email@example.com" />
           <button onclick="submitUpdateField('email',document.getElementById('settings-email').value,'email')" style="background:var(--indigo);color:#fff;border:none;border-radius:10px;padding:0 16px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap;">Save</button>
         </div>
       </div>
       <div>
         <label class="modal-lbl">Phone</label>
         <div style="display:flex;gap:8px;">
-          <input class="modal-inp" id="settings-phone" type="tel" value="` + html.EscapeString(phone) + `" placeholder="123-456-7890" />
+          <input class="modal-inp" id="settings-phone" type="tel" value="` + template.HTMLEscapeString(phone) + `" placeholder="123-456-7890" />
           <button onclick="submitUpdateField('phone',document.getElementById('settings-phone').value,'phone')" style="background:var(--indigo);color:#fff;border:none;border-radius:10px;padding:0 16px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap;">Save</button>
         </div>
       </div>
@@ -1206,8 +1235,12 @@ func dashboardScript() string {
   }
 
   // ---- API helpers -----------------------------------------------------------
+  function getCsrfToken() {
+    var m = document.cookie.match('(?:^|;)\\s*csrf_token=([^;]+)');
+    return m ? m[1] : '';
+  }
   function apiPost(url, body, onOk, onErr) {
-    fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify(body) })
+    fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': getCsrfToken() }, credentials: 'same-origin', body: JSON.stringify(body) })
       .then(function(res) { return res.json().then(function(d) { return { ok: res.ok, data: d }; }); })
       .then(function(r) { if (r.ok) { onOk(r.data); } else { onErr(r.data.error || 'Request failed'); } })
       .catch(function() { onErr('Network error'); });
@@ -1464,7 +1497,7 @@ func dashboardScript() string {
     if (!rows.length) { showToast('No overdue installments'); return; }
     var pending = rows.length, failed = 0;
     rows.forEach(function(row) {
-      fetch('/bnpl/installment/pay', { method:'POST', headers:{'Content-Type':'application/json'}, credentials:'same-origin',
+      fetch('/bnpl/installment/pay', { method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token':getCsrfToken()}, credentials:'same-origin',
         body: JSON.stringify({ installment_id: row.getAttribute('data-installment-id'), payment_id: row.getAttribute('data-payment-id'), amount_cents: parseInt(row.getAttribute('data-amount-cents')||'0',10) })
       }).then(function(res){if(!res.ok)failed++;}).catch(function(){failed++;})
         .finally(function() { pending--; if (!pending) { showToast(failed?failed+' payment(s) failed':'All overdue installments paid', failed?'warn':''); setTimeout(function(){location.reload();},1200); } });
@@ -1742,7 +1775,7 @@ func dashboardScript() string {
 
   // ---- Sign out --------------------------------------------------------------
   function signOut() {
-    fetch('/users/logout', { method:'POST', credentials:'same-origin' })
+    fetch('/users/logout', { method:'POST', credentials:'same-origin', headers:{'X-CSRF-Token':getCsrfToken()} })
       .then(function() { location.reload(); })
       .catch(function() { document.cookie='session_user_id=; Max-Age=0; path=/'; location.reload(); });
   }

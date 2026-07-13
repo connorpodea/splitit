@@ -157,33 +157,19 @@ func (s *Store) AcceptFriendRequest(requestID, receiverID string) error {
 	return nil
 }
 
-// DeclineFriendRequest deletes a pending friend request by ID.
-func (s *Store) DeclineFriendRequest(requestID string) error {
-	query := `
-	DELETE FROM friend_requests
-	WHERE id = ?;`
-
-	transaction, err := s.db.Begin()
+// DeclineFriendRequest deletes a pending friend request, restricted to the intended receiver
+// via a dual-key WHERE constraint so no user can decline another user's requests.
+func (s *Store) DeclineFriendRequest(requestID, callerID string) error {
+	result, err := s.db.Exec(`DELETE FROM friend_requests WHERE id = ? AND receiver_id = ?;`, requestID, callerID)
 	if err != nil {
-		return fmt.Errorf("failed to open transaction context for friend request decline: %w", err)
+		return fmt.Errorf("failed to decline friend request ID '%s': %w", requestID, err)
 	}
-	defer transaction.Rollback()
-
-	result, err := transaction.Exec(query, requestID)
+	rows, err := result.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("failed to execute removal delete action on friend request ID '%s': %w", requestID, err)
+		return fmt.Errorf("failed to read decline execution metrics: %w", err)
 	}
-
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("failed to read execution state metrics: %w", err)
-	}
-	if rowsAffected == 0 {
-		return fmt.Errorf("decline rejected: friend request ID '%s' not found", requestID)
-	}
-
-	if err = transaction.Commit(); err != nil {
-		return fmt.Errorf("failed to finalize friend request decline on disk commit: %w", err)
+	if rows == 0 {
+		return fmt.Errorf("decline rejected: request ID '%s' not found or does not belong to caller", requestID)
 	}
 	return nil
 }
@@ -191,31 +177,19 @@ func (s *Store) DeclineFriendRequest(requestID string) error {
 // RemoveFriendMutual deletes both directional rows of a friendship in a single query,
 // severing the relationship for both parties simultaneously.
 func (s *Store) RemoveFriendMutual(userID, friendID string) error {
-	query := `
-	DELETE FROM friends
-	WHERE (user_id = ? AND friend_id = ?) OR (user_id = ? AND friend_id = ?);`
-
-	transaction, err := s.db.Begin()
+	result, err := s.db.Exec(
+		`DELETE FROM friends WHERE (user_id = ? AND friend_id = ?) OR (user_id = ? AND friend_id = ?);`,
+		userID, friendID, friendID, userID,
+	)
 	if err != nil {
-		return fmt.Errorf("failed to open transaction context for friend removal: %w", err)
+		return fmt.Errorf("failed to sever mutual friendship between user IDs '%s' and '%s': %w", userID, friendID, err)
 	}
-	defer transaction.Rollback()
-
-	result, err := transaction.Exec(query, userID, friendID, friendID, userID)
+	rows, err := result.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("failed to sever mutual bidirectional connection map matching user IDs '%s' and '%s': %w", userID, friendID, err)
+		return fmt.Errorf("failed to read friend removal metrics: %w", err)
 	}
-
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("failed to read execution state metrics: %w", err)
-	}
-	if rowsAffected == 0 {
+	if rows == 0 {
 		return fmt.Errorf("removal rejected: friendship between user IDs '%s' and '%s' not found", userID, friendID)
-	}
-
-	if err = transaction.Commit(); err != nil {
-		return fmt.Errorf("failed to finalize friend removal on disk commit: %w", err)
 	}
 	return nil
 }

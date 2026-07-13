@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"log"
 	"net/http"
 	"time"
@@ -45,6 +47,21 @@ func main() {
 			return
 		}
 
+		// Issue a fresh CSRF token on every full page load. The token is stored
+		// in a non-HttpOnly cookie so client JS can read it and echo it as the
+		// X-CSRF-Token header on every state-mutating request.
+		b := make([]byte, 16)
+		rand.Read(b)
+		csrfToken := hex.EncodeToString(b)
+		http.SetCookie(w, &http.Cookie{
+			Name:     "csrf_token",
+			Value:    csrfToken,
+			Path:     "/",
+			HttpOnly: false,
+			SameSite: http.SameSiteLaxMode,
+			Secure:   r.TLS != nil,
+		})
+
 		w.Header().Set("Content-Type", "text/html")
 		w.WriteHeader(http.StatusOK)
 
@@ -57,12 +74,22 @@ func main() {
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
     <script src="https://unpkg.com/htmx.org/dist/ext/json-enc.js"></script>
+    <script>
+      // Echo the csrf_token cookie as X-CSRF-Token on every HTMX request.
+      function _csrf() {
+        var m = document.cookie.match('(?:^|;)\\s*csrf_token=([^;]+)');
+        return m ? m[1] : '';
+      }
+      document.addEventListener('htmx:configRequest', function(e) {
+        e.detail.headers['X-CSRF-Token'] = _csrf();
+      });
+    </script>
 </head>
 <body class="bg-[#0b0f19] text-slate-100 min-h-screen flex items-center justify-center antialiased">
 
-    <div id="main-application-viewport" 
-         hx-get="/ui/initial-view" 
-         hx-trigger="load" 
+    <div id="main-application-viewport"
+         hx-get="/ui/initial-view"
+         hx-trigger="load"
          class="w-full">
          <div class="text-center font-mono text-xs text-slate-600 animate-pulse">
              Authenticating background ledger session...
@@ -75,11 +102,12 @@ func main() {
 		w.Write([]byte(masterCanvas))
 	})
 
-	// 6. START NETWORK SERVER
+	// 6. START NETWORK SERVER — CSRF middleware wraps the entire mux so every
+	// state-mutating route is protected without per-handler boilerplate.
 	port := ":8080"
 	log.Printf("[INFO] SplitIt engine online. Streaming on http://localhost%s\n", port)
 
-	if err := http.ListenAndServe(port, nil); err != nil {
+	if err := http.ListenAndServe(port, handlers.CSRF(http.DefaultServeMux)); err != nil {
 		log.Fatalf("[CRITICAL] HTTP network server collapsed: %v", err)
 	}
 }

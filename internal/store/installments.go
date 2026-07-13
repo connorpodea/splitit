@@ -12,17 +12,18 @@ import (
 // CreateBNPLLoan initiates a full buy-now-pay-later loan: validates the buyer's credit limit,
 // calculates the fee-adjusted repayment schedule, funds the merchant via the app treasury,
 // collects the down payment, and generates the installment calendar rows.
+// Every write operation happens inside a single atomic transaction — a failure at any step
+// rolls back all prior writes so the database is never left in a partially-created state.
 func (s *Store) CreateBNPLLoan(payment *models.Payment) error {
 	if payment.TotalInstallments == 0 {
 		return fmt.Errorf("credit engine processing aborted: total plan financing installments cannot be evaluated at zero")
 	}
-
-	// Generate the master loan ID in the store
 	if payment.ID == "" {
 		payment.ID = newID()
 	}
 
-	// Reject the loan if the requested amount exceeds the buyer's available credit limit
+	// Pre-flight reads executed outside the transaction so the single connection
+	// is not held while we decide whether to proceed.
 	sender, err := s.GetUser(payment.SenderID)
 	if err != nil {
 		return fmt.Errorf("credit engine evaluation rejected: failed to query credit profile for buyer ID '%s': %w", payment.SenderID, err)
@@ -31,49 +32,44 @@ func (s *Store) CreateBNPLLoan(payment *models.Payment) error {
 		return fmt.Errorf("credit engine rejected: requested loan amount of %d cents exceeds available credit limit of %d cents for buyer ID '%s'", payment.TotalAmountCents, sender.CreditLimitCents, payment.SenderID)
 	}
 
-	// Variable for the raw price before fees
 	itemPriceCents := payment.TotalAmountCents
 
-	var feeRate float64 = 0.00
-	// Calculate the risk fee based on their credit health score iff they are paying over time
+	var feeRate float64
 	if payment.TotalInstallments > 1 {
 		feeRate = s.CalculateFeeRate(sender.CreditScore)
 	}
 
-	// Update the purchase amount by the fee rate
 	totalDebtCents := itemPriceCents + int(feeRate*float64(itemPriceCents))
-
-	baseAmountCents := totalDebtCents / int(payment.TotalInstallments) // integer division; remainder distributed to first installment
+	baseAmountCents := totalDebtCents / int(payment.TotalInstallments)
 	remainderCents := totalDebtCents - (baseAmountCents * int(payment.TotalInstallments))
+	firstInstallmentCents := baseAmountCents + remainderCents
 
-	// Step 1: Insert the master loan record to preserve historical data integrity before any fund movements
-	// This anchors the loan in the payments table without touching balances directly
 	payment.TotalAmountCents = totalDebtCents
 	payment.AmountCents = itemPriceCents
 	payment.PaymentType = "bnpl_loan_master"
 
-	query := `
-	INSERT INTO payments
-	(id, sender_id, receiver_id, amount_cents, total_amount_cents, note, payment_type, total_installments, status)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`
-
-	_, err = s.db.Exec(query, payment.ID, payment.SenderID, payment.ReceiverID, payment.AmountCents, payment.TotalAmountCents, payment.Note, payment.PaymentType, payment.TotalInstallments, payment.Status)
+	tx, err := s.db.Begin()
 	if err != nil {
-		return fmt.Errorf("loan processing aborted: failed to anchor master loan record ID '%s' into payments ledger: %w", payment.ID, err)
+		return fmt.Errorf("loan processing aborted: failed to open transaction context: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Step 1: Anchor the master loan record.
+	_, err = tx.Exec(
+		`INSERT INTO payments (id, sender_id, receiver_id, amount_cents, total_amount_cents, note, payment_type, total_installments, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+		payment.ID, payment.SenderID, payment.ReceiverID, payment.AmountCents, payment.TotalAmountCents, payment.Note, payment.PaymentType, payment.TotalInstallments, payment.Status,
+	)
+	if err != nil {
+		return fmt.Errorf("loan processing aborted: failed to anchor master loan record ID '%s': %w", payment.ID, err)
 	}
 
-	creditQuery := `
-	UPDATE users
-	SET credit_limit_cents = credit_limit_cents - ?
-	WHERE id = ?;`
-
-	_, err = s.db.Exec(creditQuery, itemPriceCents, payment.SenderID)
-	if err != nil {
+	// Step 2: Deduct the item price from the buyer's credit limit.
+	if _, err = tx.Exec(`UPDATE users SET credit_limit_cents = credit_limit_cents - ? WHERE id = ?;`, itemPriceCents, payment.SenderID); err != nil {
 		return fmt.Errorf("loan processing aborted: failed to deduct %d cents from credit limit for buyer ID '%s': %w", itemPriceCents, payment.SenderID, err)
 	}
 
-	// Step 2: Pay the Merchant — the app treasury injects the full item price to the seller immediately
-	fundingPayment := &models.Payment{
+	// Step 3: Treasury funds the merchant — full item price, immediate.
+	if err = s.transfer(tx, &models.Payment{
 		ID:                fmt.Sprintf("fund_%s", payment.ID),
 		SenderID:          treasuryID,
 		ReceiverID:        payment.ReceiverID,
@@ -83,67 +79,47 @@ func (s *Store) CreateBNPLLoan(payment *models.Payment) error {
 		TotalInstallments: 1,
 		Status:            "completed",
 		Note:              fmt.Sprintf("Treasury funded purchase for payment %s", payment.ID),
+	}); err != nil {
+		return fmt.Errorf("loan processing aborted: treasury-to-merchant funding failed: %w", err)
 	}
 
-	err = s.Pay(fundingPayment)
-	if err != nil {
-		return fmt.Errorf("loan processing aborted: upfront treasury capital injection for merchant pool failed: %w", err)
-	}
-
-	// Step 3: Collect the Down Payment — pull the first installment from the buyer back to the app treasury
-	downPayment := &models.Payment{
+	// Step 4: Collect the down payment — first installment from buyer to treasury.
+	if err = s.transfer(tx, &models.Payment{
 		ID:                fmt.Sprintf("down_%s", payment.ID),
 		SenderID:          payment.SenderID,
 		ReceiverID:        treasuryID,
-		AmountCents:       baseAmountCents + remainderCents,
-		TotalAmountCents:  baseAmountCents + remainderCents,
+		AmountCents:       firstInstallmentCents,
+		TotalAmountCents:  firstInstallmentCents,
 		PaymentType:       "installment",
 		TotalInstallments: 1,
 		Status:            "completed",
 		Note:              fmt.Sprintf("Down payment for loan %s", payment.ID),
+	}); err != nil {
+		return fmt.Errorf("loan processing aborted: down payment collection failed for buyer ID '%s': %w", payment.SenderID, err)
 	}
 
-	err = s.Pay(downPayment)
-	if err != nil {
-		return fmt.Errorf("loan processing aborted: down payment collection extraction failed for buyer ID '%s': %w", payment.SenderID, err)
-	}
-
-	// Step 4: Generate Installment Calendars — build the remaining debt schedule into the installments table
+	// Step 5: Generate the bi-weekly installment schedule.
 	currentTime := time.Now()
-
 	for i := uint8(1); i <= payment.TotalInstallments; i++ {
-		var installmentAmountCents int
-		var isPaid bool
-		var dueDate time.Time
-
-		if i == 1 {
-			// Installment 1 is paid upfront during s.Pay(downPayment)
-			installmentAmountCents = baseAmountCents + remainderCents
-			isPaid = true
-			dueDate = currentTime
-		} else {
-			installmentAmountCents = baseAmountCents
-			isPaid = false
-			// Bi-weekly schedule: installment 2 at day 14, 3 at day 28, 4 at day 42
-			dueDate = currentTime.AddDate(0, 0, int(i-1)*14)
-		}
-
-		// Generate a structured identifier for each installment row
-		installmentID := fmt.Sprintf("inst_%s_%d", payment.ID, i)
-
+		amount := baseAmountCents
 		isPaidInt := 0
-		if isPaid {
+		dueDate := currentTime.AddDate(0, 0, int(i-1)*14)
+		if i == 1 {
+			amount = firstInstallmentCents
 			isPaidInt = 1
+			dueDate = currentTime
 		}
+		installmentID := fmt.Sprintf("inst_%s_%d", payment.ID, i)
+		if _, err = tx.Exec(
+			`INSERT INTO installments (id, payment_id, user_id, amount_cents, due_date, is_paid) VALUES (?,?,?,?,?,?);`,
+			installmentID, payment.ID, payment.SenderID, amount, dueDate.Format("2006-01-02"), isPaidInt,
+		); err != nil {
+			return fmt.Errorf("loan processing aborted: failed to create installment %d for loan ID '%s': %w", i, payment.ID, err)
+		}
+	}
 
-		installmentQuery := `
-		INSERT INTO installments
-		(id, payment_id, user_id, amount_cents, due_date, is_paid)
-		VALUES (?,?,?,?,?,?);`
-		_, err = s.db.Exec(installmentQuery, installmentID, payment.ID, payment.SenderID, installmentAmountCents, dueDate.Format("2006-01-02"), isPaidInt)
-		if err != nil {
-			return fmt.Errorf("failed to save generated installment row segment %d for loan ID '%s' into database schedules: %w", i, payment.ID, err)
-		}
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("loan processing aborted: failed to commit transaction: %w", err)
 	}
 	return nil
 }
@@ -627,50 +603,43 @@ func (s *Store) ApplyMonthlyOverduePenalties() error {
 	}
 
 	for _, userID := range affectedUserIDs {
-		tx, err := s.db.Begin()
-		if err != nil {
-			return fmt.Errorf("failed to open transaction context for overdue penalty on user '%s': %w", userID, err)
-		}
-		defer tx.Rollback()
-
-		// Clamp credit score to 0 floor and capture the resulting score after penalty.
-		scoreQuery := `
-		UPDATE users
-		SET credit_score = MAX(0, credit_score - ?)
-		WHERE id = ?;`
-
-		if _, err = tx.Exec(scoreQuery, overdueScorePenalty, userID); err != nil {
-			return fmt.Errorf("failed to apply overdue credit score penalty for user '%s': %w", userID, err)
-		}
-
-		var newScore int
-		if err = tx.QueryRow(`SELECT credit_score FROM users WHERE id = ?`, userID).Scan(&newScore); err != nil {
-			return fmt.Errorf("failed to read post-penalty credit score for user '%s': %w", userID, err)
-		}
-
-		logQuery := `
-		INSERT INTO credit_score_log (id, user_id, score, delta)
-		VALUES (?, ?, ?, ?);`
-
-		if _, err = tx.Exec(logQuery, newID(), userID, newScore, -overdueScorePenalty); err != nil {
-			return fmt.Errorf("failed to write overdue penalty audit event to credit score log for user '%s': %w", userID, err)
-		}
-
-		// Mark all newly penalized overdue installments so they are not double-penalized on future runs.
-		markQuery := `
-		UPDATE installments
-		SET penalty_applied = 1
-		WHERE user_id = ? AND is_paid = 0 AND due_date < ? AND penalty_applied = 0;`
-
-		if _, err = tx.Exec(markQuery, userID, today); err != nil {
-			return fmt.Errorf("failed to mark overdue installments as penalized for user '%s': %w", userID, err)
-		}
-
-		if err = tx.Commit(); err != nil {
-			return fmt.Errorf("critical engine mismatch: failed to commit overdue penalty transaction for user '%s': %w", userID, err)
+		if err := s.applyOverduePenalty(userID, today); err != nil {
+			return err
 		}
 	}
+	return nil
+}
 
+// applyOverduePenalty applies the monthly credit score deduction and penalty markers for a
+// single user in an isolated transaction. Extracted from the loop in ApplyMonthlyOverduePenalties
+// so that defer tx.Rollback() fires at the end of each iteration, not at function return.
+func (s *Store) applyOverduePenalty(userID, today string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to open transaction context for overdue penalty on user '%s': %w", userID, err)
+	}
+	defer tx.Rollback()
+
+	if _, err = tx.Exec(`UPDATE users SET credit_score = MAX(0, credit_score - ?) WHERE id = ?;`, overdueScorePenalty, userID); err != nil {
+		return fmt.Errorf("failed to apply overdue credit score penalty for user '%s': %w", userID, err)
+	}
+
+	var newScore int
+	if err = tx.QueryRow(`SELECT credit_score FROM users WHERE id = ?`, userID).Scan(&newScore); err != nil {
+		return fmt.Errorf("failed to read post-penalty credit score for user '%s': %w", userID, err)
+	}
+
+	if _, err = tx.Exec(`INSERT INTO credit_score_log (id, user_id, score, delta) VALUES (?, ?, ?, ?);`, newID(), userID, newScore, -overdueScorePenalty); err != nil {
+		return fmt.Errorf("failed to write overdue penalty audit event to credit score log for user '%s': %w", userID, err)
+	}
+
+	if _, err = tx.Exec(`UPDATE installments SET penalty_applied = 1 WHERE user_id = ? AND is_paid = 0 AND due_date < ? AND penalty_applied = 0;`, userID, today); err != nil {
+		return fmt.Errorf("failed to mark overdue installments as penalized for user '%s': %w", userID, err)
+	}
+
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit overdue penalty transaction for user '%s': %w", userID, err)
+	}
 	return nil
 }
 

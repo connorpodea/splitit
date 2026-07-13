@@ -135,7 +135,7 @@ func (h *Handler) LoginUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := h.sessions.create(user.ID)
+	token, err := h.store.CreateSession(user.ID)
 	if err != nil {
 		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to create session"})
 		return
@@ -159,7 +159,7 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if cookie, err := r.Cookie("session_token"); err == nil {
-		h.sessions.delete(cookie.Value)
+		h.store.DeleteSession(cookie.Value)
 	}
 
 	http.SetCookie(w, &http.Cookie{
@@ -512,7 +512,10 @@ func viewProfile(user *models.User, avatar, name, handle, email, phone string, f
 	}
 
 	avatarColor := user.ProfileColor
-	if avatarColor == "" {
+	// Guard: only allow well-formed hex colour strings in the CSS value context.
+	// UpdateProfileColor enforces an allowlist, but this defense-in-depth check
+	// ensures a database compromise cannot inject arbitrary CSS.
+	if avatarColor == "" || !isHexColor(avatarColor) {
 		avatarColor = "#4ade80"
 	}
 
@@ -610,6 +613,19 @@ func profileDisplayName(p *models.Profile) string {
 		return p.Name
 	}
 	return p.ID
+}
+
+// isHexColor returns true for strings of the form #rrggbb (exactly 7 chars, lowercase or uppercase hex).
+func isHexColor(s string) bool {
+	if len(s) != 7 || s[0] != '#' {
+		return false
+	}
+	for _, c := range s[1:] {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return true
 }
 
 // creditScoreLabel maps a numeric credit score to its corresponding tier label string.
@@ -815,9 +831,7 @@ func (h *Handler) DeactivateAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if cookie, err := r.Cookie("session_token"); err == nil {
-		h.sessions.delete(cookie.Value)
-	}
+	h.store.DeleteAllSessionsForUser(userID)
 	http.SetCookie(w, &http.Cookie{
 		Name:     "session_token",
 		Value:    "",

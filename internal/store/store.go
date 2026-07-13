@@ -321,5 +321,52 @@ func (s *Store) createTables() error {
 		return err
 	}
 
+	query = `
+	CREATE TABLE IF NOT EXISTS sessions (
+		token TEXT PRIMARY KEY,
+		user_id TEXT NOT NULL,
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+	);`
+
+	_, err = s.db.Exec(query)
+	if err != nil {
+		return err
+	}
+
+	// ---- Indices on foreign key columns ----------------------------------------
+	// SQLite does not automatically index FK columns. Without these, every join or
+	// filtered query on these columns performs a full table scan.
+	indices := []string{
+		`CREATE INDEX IF NOT EXISTS idx_payments_sender_id        ON payments (sender_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_payments_receiver_id      ON payments (receiver_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_payment_requests_payer    ON payment_requests (payer_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_payment_requests_requester ON payment_requests (requester_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_installments_payment_id   ON installments (payment_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_installments_user_id      ON installments (user_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_friend_requests_sender    ON friend_requests (sender_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_friend_requests_receiver  ON friend_requests (receiver_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_notifications_user_id     ON notifications (user_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_group_members_member_id   ON group_members (member_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_group_invitations_sender  ON group_invitations (sender_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_group_invitations_receiver ON group_invitations (receiver_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_sessions_user_id          ON sessions (user_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_wallet_txns_user_id       ON wallet_transactions (user_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_credit_log_user_id        ON credit_score_log (user_id);`,
+
+		// ---- Uniqueness constraints (DB-4) ---------------------------------------
+		// Prevent duplicate friend requests and group invitations from concurrent calls.
+		`CREATE UNIQUE INDEX IF NOT EXISTS uq_friend_requests_pair
+		    ON friend_requests (sender_id, receiver_id);`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS uq_group_invitations_pair
+		    ON group_invitations (group_id, receiver_id);`,
+	}
+
+	for _, idx := range indices {
+		if _, err = s.db.Exec(idx); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }

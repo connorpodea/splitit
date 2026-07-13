@@ -1,68 +1,20 @@
 package handlers
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"net/http"
-	"sync"
 
 	"github.com/connorpodea/splitit/internal/store"
 )
 
-// sessionStore is a concurrency-safe in-memory map of random token → userID.
-// Tokens are issued on login and revoked on logout or account deactivation.
-type sessionStore struct {
-	mu       sync.RWMutex
-	sessions map[string]string
-}
-
-func newSessionStore() *sessionStore {
-	return &sessionStore{sessions: make(map[string]string)}
-}
-
-// create generates a cryptographically random 64-hex-char token, stores the
-// token→userID mapping, and returns the token to be placed in the session cookie.
-func (ss *sessionStore) create(userID string) (string, error) {
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
-	}
-	token := hex.EncodeToString(b)
-	ss.mu.Lock()
-	ss.sessions[token] = userID
-	ss.mu.Unlock()
-	return token, nil
-}
-
-// lookup returns the userID associated with a token, or false if the token is
-// unknown or has been revoked.
-func (ss *sessionStore) lookup(token string) (string, bool) {
-	ss.mu.RLock()
-	userID, ok := ss.sessions[token]
-	ss.mu.RUnlock()
-	return userID, ok
-}
-
-// delete removes a token, effectively signing the user out on the server side.
-func (ss *sessionStore) delete(token string) {
-	ss.mu.Lock()
-	delete(ss.sessions, token)
-	ss.mu.Unlock()
-}
-
 // Handler isolates our web API server logic from our data storage layer.
 type Handler struct {
-	store    *store.Store
-	sessions *sessionStore
+	store *store.Store
 }
 
-// New instantiates the web handler with a live database reference and a fresh session store.
+// New instantiates the web handler with a live database reference.
 func New(s *store.Store) *Handler {
-	return &Handler{
-		store:    s,
-		sessions: newSessionStore(),
-	}
+	return &Handler{store: s}
 }
 
 // WriteJSON serialises data to JSON and writes it to the response with the given HTTP status.
@@ -82,11 +34,11 @@ func writeHTML(w http.ResponseWriter, body string) {
 // CreateSession creates a session token for the given userID and returns it.
 // Exported for use in handler integration tests only.
 func (h *Handler) CreateSession(userID string) (string, error) {
-	return h.sessions.create(userID)
+	return h.store.CreateSession(userID)
 }
 
 // authenticateSession validates the session cookie and returns the associated userID.
-// The cookie value is an opaque random token looked up in the server-side session store —
+// The cookie value is an opaque random token looked up in the sessions table —
 // it carries no identity information on its own, so forging it is computationally infeasible.
 func (h *Handler) authenticateSession(w http.ResponseWriter, r *http.Request) (string, bool) {
 	cookie, err := r.Cookie("session_token")
@@ -94,7 +46,7 @@ func (h *Handler) authenticateSession(w http.ResponseWriter, r *http.Request) (s
 		WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "Authentication required: missing or expired session"})
 		return "", false
 	}
-	userID, ok := h.sessions.lookup(cookie.Value)
+	userID, ok := h.store.LookupSession(cookie.Value)
 	if !ok {
 		WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "Authentication required: session not recognised"})
 		return "", false

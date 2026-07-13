@@ -222,7 +222,7 @@ func (s *Store) GetTopRecipients(userID string, limit int, since time.Time) ([]m
 	sinceStr := since.Format("2006-01-02")
 
 	query := `
-	SELECT u.id, u.name, u.email, u.phone_number, u.created_at,
+	SELECT u.id, u.name, u.email, u.phone_number, u.profile_color, u.created_at,
 		COALESCE(SUM(p.amount_cents), 0) AS total_sent_cents
 	FROM payments p
 	JOIN users u ON u.id = p.receiver_id
@@ -246,6 +246,7 @@ func (s *Store) GetTopRecipients(userID string, limit int, since time.Time) ([]m
 			&r.Profile.Name,
 			&r.Profile.Email,
 			&r.Profile.PhoneNumber,
+			&r.Profile.ProfileColor,
 			&r.Profile.CreatedAt,
 			&r.TotalSentCents,
 		)

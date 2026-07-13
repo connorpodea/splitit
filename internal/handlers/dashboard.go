@@ -33,7 +33,7 @@ func (h *Handler) GetInitialView(w http.ResponseWriter, r *http.Request) {
 		writeHTML(w, loginHTML())
 		return
 	}
-	userID, ok := h.sessions.lookup(cookie.Value)
+	userID, ok := h.store.LookupSession(cookie.Value)
 	if !ok {
 		writeHTML(w, loginHTML())
 		return
@@ -47,7 +47,7 @@ func (h *Handler) GetDashboardView(w http.ResponseWriter, r *http.Request) {
 		writeHTML(w, loginHTML())
 		return
 	}
-	userID, ok := h.sessions.lookup(cookie.Value)
+	userID, ok := h.store.LookupSession(cookie.Value)
 	if !ok {
 		writeHTML(w, loginHTML())
 		return

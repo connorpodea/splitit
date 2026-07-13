@@ -34,8 +34,12 @@ func (h *Handler) Pay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Hard override variable integrity to completely block users from spending out of foreign profiles
 	input.SenderID = sessionID
+
+	if len(input.Note) > 500 {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Note must be 500 characters or fewer"})
+		return
+	}
 
 	// For direct payments the client sends only amount_cents; TotalAmountCents must equal AmountCents.
 	if input.TotalAmountCents == 0 {
@@ -52,34 +56,35 @@ func (h *Handler) Pay(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetPayment returns a single payment record by the payment_id URL query parameter.
+// The caller must be either the sender or receiver of the payment.
 func (h *Handler) GetPayment(w http.ResponseWriter, r *http.Request) {
-	// Ensure that this endpoint only accepts GET requests
 	if r.Method != http.MethodGet {
 		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only GET requests are permitted to this route"})
 		return
 	}
 
-	// Confirm user active session validity state before parsing database records
-	_, authorized := h.authenticateSession(w, r)
+	userID, authorized := h.authenticateSession(w, r)
 	if !authorized {
 		return
 	}
 
-	// Extract the payment ID from the URL query parameters
 	paymentID := r.URL.Query().Get("payment_id")
 	if paymentID == "" {
 		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Missing required URL query parameter: 'payment_id'"})
 		return
 	}
 
-	// Query the database engine for this payment
 	payment, err := h.store.GetPayment(paymentID)
 	if err != nil {
 		WriteJSON(w, http.StatusNotFound, map[string]string{"error": friendlyError(err)})
 		return
 	}
 
-	// Package the returned data struct into JSON and ship it over the wire
+	if payment.SenderID != userID && payment.ReceiverID != userID {
+		WriteJSON(w, http.StatusForbidden, map[string]string{"error": "You do not have access to this payment record"})
+		return
+	}
+
 	WriteJSON(w, http.StatusOK, payment)
 }
 
@@ -217,8 +222,12 @@ func (h *Handler) CreatePaymentRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Bind requester properties cleanly to block foreign entry identity spoofing attempts
 	input.RequesterID = requesterID
+
+	if len(input.Note) > 500 {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Note must be 500 characters or fewer"})
+		return
+	}
 
 	// Route to RequestFromGroup if the payer ID belongs to a group rather than an individual user.
 	members, _ := h.store.ListGroupMembers(input.PayerID)

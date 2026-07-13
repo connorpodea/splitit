@@ -32,10 +32,13 @@ func (h *Handler) CreateBNPLLoan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Force parameter validation by tracking the transaction strictly through verified cookie identifiers
 	input.SenderID = borrowerID
 
-	// Pass the populated struct down to the database engine
+	if len(input.Note) > 500 {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Note must be 500 characters or fewer"})
+		return
+	}
+
 	err = h.store.CreateBNPLLoan(&input)
 	if err != nil {
 		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": friendlyError(err)})
@@ -142,35 +145,35 @@ func (h *Handler) ListOverdueInstallments(w http.ResponseWriter, r *http.Request
 }
 
 // GetPaymentWithInstallments returns a master payment record alongside its full installment
-// schedule, identified by the payment_id URL query parameter.
+// schedule. The caller must be either the borrower (sender) or merchant (receiver).
 func (h *Handler) GetPaymentWithInstallments(w http.ResponseWriter, r *http.Request) {
-	// Ensure that this endpoint only accepts GET requests
 	if r.Method != http.MethodGet {
 		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only GET requests are permitted to this route"})
 		return
 	}
 
-	// Confirm user active session validity state before retrieving sensitive loan records
-	_, authorized := h.authenticateSession(w, r)
+	userID, authorized := h.authenticateSession(w, r)
 	if !authorized {
 		return
 	}
 
-	// Extract the master loan payment ID from the URL query parameters
 	paymentID := r.URL.Query().Get("payment_id")
 	if paymentID == "" {
 		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Missing required URL query parameter: 'payment_id'"})
 		return
 	}
 
-	// Query the database engine for the master payment record and its installment schedule
 	result, err := h.store.GetPaymentWithInstallments(paymentID)
 	if err != nil {
 		WriteJSON(w, http.StatusNotFound, map[string]string{"error": friendlyError(err)})
 		return
 	}
 
-	// Package the composite response into JSON and ship it over the wire
+	if result.Payment.SenderID != userID && result.Payment.ReceiverID != userID {
+		WriteJSON(w, http.StatusForbidden, map[string]string{"error": "You do not have access to this loan record"})
+		return
+	}
+
 	WriteJSON(w, http.StatusOK, result)
 }
 

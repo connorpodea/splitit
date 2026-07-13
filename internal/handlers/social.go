@@ -3,7 +3,6 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
-	"html"
 	"html/template"
 	"net/http"
 	"strings"
@@ -117,14 +116,15 @@ func (h *Handler) AcceptFriendRequest(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, input)
 }
 
-// DeclineFriendRequest deletes a pending friend request by ID for the authenticated user.
+// DeclineFriendRequest deletes a pending friend request by ID. The store enforces that the
+// session user is the intended receiver — callers cannot decline other users' requests.
 func (h *Handler) DeclineFriendRequest(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Only POST methods are permitted to this route"})
 		return
 	}
 
-	_, authorized := h.authenticateSession(w, r)
+	callerID, authorized := h.authenticateSession(w, r)
 	if !authorized {
 		return
 	}
@@ -133,14 +133,12 @@ func (h *Handler) DeclineFriendRequest(w http.ResponseWriter, r *http.Request) {
 		RequestID string `json:"request_id"`
 	}
 	var input Input
-	err := json.NewDecoder(r.Body).Decode(&input)
-	if err != nil {
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil || input.RequestID == "" {
 		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON request payload formatting"})
 		return
 	}
 
-	err = h.store.DeclineFriendRequest(input.RequestID)
-	if err != nil {
+	if err := h.store.DeclineFriendRequest(input.RequestID, callerID); err != nil {
 		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": friendlyError(err)})
 		return
 	}
@@ -206,7 +204,6 @@ func (h *Handler) ListFriends(w http.ResponseWriter, r *http.Request) {
 func viewFriends(friends []models.Profile, friendRequests []models.FriendRequest) string {
 	friendCount := len(friends)
 
-	// --- Incoming friend requests banner ---
 	requestsSection := ""
 	if len(friendRequests) > 0 {
 		plural := ""
@@ -214,36 +211,24 @@ func viewFriends(friends []models.Profile, friendRequests []models.FriendRequest
 			plural = "s"
 		}
 		hexPalette := []string{"#4ade80", "#22d3ee", "#fb7185", "#facc15", "#c084fc", "#db2777"}
-		rows := ""
+		var reqBuf strings.Builder
 		for i, req := range friendRequests {
 			hex := hexPalette[i%len(hexPalette)]
 			ini := strings.ToUpper(req.SenderID)
 			if len([]rune(ini)) > 2 {
 				ini = string([]rune(ini)[:2])
 			}
-			rows += `
-      <div style="display:flex;align-items:center;gap:12px;padding:12px 14px;border-bottom:1px solid var(--border-soft);" data-req-row="` + req.ID + `">
-        <div class="row-avatar" style="background:` + hex + `;color:#fff">` + html.EscapeString(ini) + `</div>
-        <div style="flex:1;min-width:0;">
-          <div style="font-size:14px;font-weight:600;color:var(--text);">@` + html.EscapeString(req.SenderID) + `</div>
-          <div style="font-size:12px;color:var(--text-faint);">Wants to be friends</div>
-        </div>
-        <div style="display:flex;gap:6px;">
-          <button onclick="acceptFriendRequest('` + req.ID + `')"
-            style="background:var(--emerald);color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">
-            Accept
-          </button>
-          <button onclick="declineFriendRequest('` + req.ID + `',this)"
-            style="background:var(--surface-3);color:var(--text-dim);border:1px solid var(--border);border-radius:8px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;">
-            Decline
-          </button>
-        </div>
-      </div>`
+			reqBuf.WriteString(renderTmpl(friendRequestRowTmpl, friendRequestRowData{
+				RequestID: req.ID,
+				Color:     hex,
+				Initials:  ini,
+				SenderID:  req.SenderID,
+			}))
 		}
 		requestsSection = `
   <div style="margin-bottom:16px;">
     <div style="font-size:11px;font-weight:700;color:var(--text-mute);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px;">` + fmt.Sprintf("%d", len(friendRequests)) + ` pending request` + plural + `</div>
-    <div class="card">` + rows + `</div>
+    <div class="card">` + reqBuf.String() + `</div>
   </div>`
 	}
 
@@ -291,7 +276,7 @@ func viewFriends(friends []models.Profile, friendRequests []models.FriendRequest
 // friendsRows renders the list of individual friend row HTML elements for the social view.
 func friendsRows(friends []models.Profile) string {
 	hexPalette := []string{"#4ade80", "#22d3ee", "#fb7185", "#facc15", "#c084fc", "#db2777"}
-	out := ""
+	var buf strings.Builder
 	for i, f := range friends {
 		hex := f.ProfileColor
 		if hex == "" {
@@ -307,28 +292,16 @@ func friendsRows(friends []models.Profile) string {
 				ini = strings.ToUpper(string(r[0]))
 			}
 		}
-		searchKey := strings.ToLower(dname + " @" + f.ID)
-		out += `
-    <div class="friend-row" data-name="` + html.EscapeString(searchKey) + `" data-friend-id="` + html.EscapeString(f.ID) + `">
-      <div class="row-avatar" style="background:` + hex + `;color:#fff">` + html.EscapeString(ini) + `</div>
-      <div class="row-body" style="flex:1; min-width:0;">
-        <b>` + html.EscapeString(dname) + `</b>
-        <div>@` + html.EscapeString(f.ID) + `</div>
-      </div>
-      <div class="friend-actions">
-        <button title="History" onclick="openHistorySheet('` + f.ID + `','` + template.JSEscapeString(dname) + `')">
-          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.51"/></svg>
-        </button>
-        <button title="Pay" onclick="openPayToFriend('` + f.ID + `')">
-          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-        </button>
-        <button class="remove" title="Remove" onclick="removeFriend(this,'` + f.ID + `','` + template.JSEscapeString(dname) + `')">
-          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/></svg>
-        </button>
-      </div>
-    </div>`
+		buf.WriteString(renderTmpl(friendListRowTmpl, friendListRowData{
+			SearchKey: strings.ToLower(dname + " @" + f.ID),
+			FriendID:  f.ID,
+			Color:     hex,
+			Initials:  ini,
+			Name:      dname,
+			Handle:    f.ID,
+		}))
 	}
-	return out
+	return buf.String()
 }
 
 // addFriendSheetHTML renders the bottom-sheet HTML for the add-friend search flow,
@@ -353,17 +326,17 @@ func addFriendSheetHTML() string {
 </div>`
 }
 
-// sessionContextScript embeds the current user's ID and friend set as JS
-// globals so the client-side search can exclude them without a round-trip.
+// sessionContextScript embeds the current user's ID and friend set as JS globals so the
+// client-side search can exclude them without a round-trip.
+// template.JSEscapeString is used for all user-supplied values embedded in JS string literals.
 func sessionContextScript(userID string, friends []models.Profile) string {
-	safeID := strings.ReplaceAll(userID, `"`, ``)
 	lit := "["
 	for i, f := range friends {
 		if i > 0 {
 			lit += ","
 		}
-		lit += `"` + strings.ReplaceAll(f.ID, `"`, ``) + `"`
+		lit += `"` + template.JSEscapeString(f.ID) + `"`
 	}
 	lit += "]"
-	return `<script>window._selfID="` + safeID + `";window._friendIDs=new Set(` + lit + `);</script>`
+	return `<script>window._selfID="` + template.JSEscapeString(userID) + `";window._friendIDs=new Set(` + lit + `);</script>`
 }

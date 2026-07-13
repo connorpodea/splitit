@@ -298,7 +298,7 @@ func (s *Store) UpdateDisplayName(userID, newName string) error {
 		return err
 	}
 	if rowsAffected == 0 {
-		return fmt.Errorf("")
+		return fmt.Errorf("display name update rejected: user ID '%s' not found", userID)
 	}
 	return nil
 }

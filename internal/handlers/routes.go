@@ -4,14 +4,17 @@ import "net/http"
 
 // RegisterRoutes attaches all application endpoints to Go's standard HTTP router.
 func (h *Handler) RegisterRoutes() {
+	// Rate limiter shared across all auth endpoints: 5 req/min per IP, burst 5.
+	authLimit := newAuthRateLimiter()
+
 	// UI Content Screens
 	http.HandleFunc("/ui/initial-view", h.GetInitialView)
 	http.HandleFunc("/ui/register-view", h.GetRegistrationView)
 	http.HandleFunc("/ui/dashboard-view", h.GetDashboardView)
 
-	// Users & Profiles
-	http.HandleFunc("/users/create", h.CreateUser)
-	http.HandleFunc("/users/login", h.LoginUser)
+	// Users & Profiles — login and register are rate-limited at the edge.
+	http.Handle("/users/create", authLimit(http.HandlerFunc(h.CreateUser)))
+	http.Handle("/users/login", authLimit(http.HandlerFunc(h.LoginUser)))
 	http.HandleFunc("/users/logout", h.Logout)
 	http.HandleFunc("/users/get", h.GetUser)
 	http.HandleFunc("/users/list", h.ListUsers)
