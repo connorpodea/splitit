@@ -32,7 +32,8 @@ func New() (*Store, error) {
 // NewFromPath initializes the database engine from a custom path string.
 // This allows testing suites to pass ":memory:" for isolated, in-memory testing.
 func NewFromPath(path string) (*Store, error) {
-	// Dynamically append the foreign key pragma check configuration onto the incoming path
+	// Dynamically append the foreign key pragma check configuration onto the incoming path.
+	// This ensures that referenced rows exist before inserting new data.
 	db, err := sql.Open("sqlite", path+"?_pragma=foreign_keys=1")
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database path '%s': %w", path, err)
@@ -44,46 +45,10 @@ func NewFromPath(path string) (*Store, error) {
 
 	s := &Store{db: db}
 
-	// Automate table generation schema rules execution
-	err = s.createTables()
-	if err != nil {
-		db.Close() // Clean up the connection if table creation fails
-		return nil, fmt.Errorf("database initialization failed during custom path schema setup: %w", err)
+	if err = s.createTables(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("database initialization failed: %w", err)
 	}
-
-	// Idempotent migration: adds profile_color to databases created before the column existed.
-	// SQLite returns "duplicate column name" on re-run; we intentionally ignore that error.
-	s.db.Exec(`ALTER TABLE users ADD COLUMN profile_color TEXT NOT NULL DEFAULT 'av-indigo';`)
-
-	// Idempotent migration: convert legacy CSS class names to the new hex palette.
-	// Each UPDATE is a no-op on any row that was already migrated or defaulted to a hex value.
-	for _, pair := range [][2]string{
-		{"av-indigo", "#c084fc"},
-		{"av-violet", "#c084fc"},
-		{"av-amber", "#facc15"},
-		{"av-emerald", "#4ade80"},
-		{"av-cyan", "#22d3ee"},
-		{"av-rose", "#fb7185"},
-		{"av-pink", "#db2777"},
-	} {
-		// pair[0] = old CSS class name, pair[1] = replacement hex value
-		s.db.Exec(`UPDATE users SET profile_color = ? WHERE profile_color = ?;`, pair[1], pair[0])
-	}
-	// Any remaining non-hex value (e.g. 'av-indigo' default on the column) becomes Mint Green.
-	s.db.Exec(`UPDATE users SET profile_color = '#4ade80' WHERE profile_color NOT LIKE '#%';`)
-
-	// Seed the virtual treasury account used as counterparty in BNPL fund flows.
-	// INSERT OR IGNORE is idempotent — safe on every restart and on existing databases.
-	// is_active=0 keeps it invisible in all user-facing list queries.
-	s.db.Exec(`
-INSERT OR IGNORE INTO users
-  (id, password_hash, name, email, phone_number,
-   balance_cents, credit_score, credit_limit_cents,
-   is_active, profile_color)
-VALUES
-  ('app_treasury','NO_LOGIN','App Treasury','','',
-   9999999999, 0, 0, 0, '#4ade80');
-`)
 
 	return s, nil
 }
@@ -293,20 +258,6 @@ func (s *Store) createTables() error {
 	}
 
 	query = `
-		CREATE TABLE IF NOT EXISTS credit_history (
-		id TEXT PRIMARY KEY,
-		user_id TEXT NOT NULL,
-		credit_score INTEGER NOT NULL,
-		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-		FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
-	);`
-
-	_, err = s.db.Exec(query)
-	if err != nil {
-		return err
-	}
-
-	query = `
 	CREATE TABLE IF NOT EXISTS credit_score_log (
 		id TEXT PRIMARY KEY,
 		user_id TEXT NOT NULL,
@@ -368,5 +319,13 @@ func (s *Store) createTables() error {
 		}
 	}
 
-	return nil
+	_, err = s.db.Exec(`
+INSERT OR IGNORE INTO users
+  (id, password_hash, name, email, phone_number,
+   balance_cents, credit_score, credit_limit_cents,
+   is_active, profile_color)
+VALUES
+  ('app_treasury','NO_LOGIN','App Treasury','','',
+   9999999999, 0, 0, 0, '#4ade80');`)
+	return err
 }
