@@ -21,6 +21,7 @@ func main() {
 	log.Println("[INFO] SQLite storage engine initialized successfully")
 
 	// 2. OVERDUE PENALTY SCHEDULER
+	// Goroutine runs concurrently so the ticker loop doesn't block startup or the HTTP server.
 	go func() {
 		for range time.NewTicker(24 * time.Hour).C {
 			if err := s.ApplyMonthlyOverduePenalties(); err != nil {
@@ -36,20 +37,16 @@ func main() {
 	h.RegisterRoutes()
 	log.Println("[INFO] Application route handlers mapped successfully")
 
-	// 4. STATIC ASSET HOSTING
-	fs := http.FileServer(http.Dir("./ui"))
-	http.Handle("/static/", http.StripPrefix("/static/", fs))
-
-	// 5. MASTER FRAMEWORK CONTAINER ROUTER
+	// 4. ROOT ROUTE — serves the single-page app shell
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)
 			return
 		}
 
-		// Issue a fresh CSRF token on every full page load. The token is stored
-		// in a non-HttpOnly cookie so client JS can read it and echo it as the
-		// X-CSRF-Token header on every state-mutating request.
+		// csrf_token — proves the request came from our frontend, not a malicious site.
+		// Does NOT identify who the user is. Never stored in the database.
+		// Distinct from session_token, which identifies the logged-in user via a DB lookup.
 		b := make([]byte, 16)
 		rand.Read(b)
 		csrfToken := hex.EncodeToString(b)
@@ -102,7 +99,7 @@ func main() {
 		w.Write([]byte(masterCanvas))
 	})
 
-	// 6. START NETWORK SERVER — CSRF middleware wraps the entire mux so every
+	// 5. START NETWORK SERVER — CSRF middleware wraps the entire mux so every
 	// state-mutating route is protected without per-handler boilerplate.
 	port := ":8080"
 	log.Printf("[INFO] SplitIt engine online. Streaming on http://localhost%s\n", port)

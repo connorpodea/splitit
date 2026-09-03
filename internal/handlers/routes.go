@@ -13,6 +13,9 @@ func (h *Handler) RegisterRoutes() {
 	http.HandleFunc("/ui/dashboard-view", h.GetDashboardView)
 
 	// Users & Profiles — login and register are rate-limited at the edge.
+	// http.Handle is used here instead of http.HandleFunc because authLimit returns an
+	// http.Handler interface (a middleware wrapper), not a plain function. http.HandlerFunc
+	// converts the plain handler method into that interface so the middleware can wrap it.
 	http.Handle("/users/create", authLimit(http.HandlerFunc(h.CreateUser)))
 	http.Handle("/users/login", authLimit(http.HandlerFunc(h.LoginUser)))
 	http.HandleFunc("/users/logout", h.Logout)

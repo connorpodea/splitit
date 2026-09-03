@@ -39,8 +39,10 @@ func NewFromPath(path string) (*Store, error) {
 		return nil, fmt.Errorf("failed to open database path '%s': %w", path, err)
 	}
 
-	// SQLite is single-writer; one connection prevents "database is locked" errors
-	// and ensures in-memory databases are shared across all callers.
+	// SQLite doesnt allow multiple connections to the databse to serve 
+	// concurrent requests. It only allows one write at a time. 
+	// One connection prevents "database is locked" errors
+	// and ensures in-memory databases are shared across all callers. 
 	db.SetMaxOpenConns(1)
 
 	s := &Store{db: db}

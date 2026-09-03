@@ -7,12 +7,12 @@ import (
 	"time"
 )
 
-// CSRF is an exported middleware that rejects any state-mutating request
-// (POST, PUT, DELETE, PATCH) that does not echo the csrf_token cookie value
-// in the X-CSRF-Token request header. Safe methods pass through unchanged.
-// This implements the Double Submit Cookie pattern: the client reads the
-// cookie (HttpOnly=false) and reflects its value as a header. Cross-site
-// requests cannot do this because they cannot read cookies from another origin.
+// CSRF checks the csrf_token cookie — this proves the request came from our frontend,
+// not a malicious third-party site. It does NOT identify who the user is.
+// For user identity, see authenticateSession() in handler.go which checks session_token.
+// Implements the Double Submit Cookie pattern: the client reads the cookie (HttpOnly=false)
+// and reflects its value as X-CSRF-Token header. Cross-site requests can't do this
+// because they cannot read cookies from another origin.
 func CSRF(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {

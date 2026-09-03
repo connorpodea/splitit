@@ -37,9 +37,10 @@ func (h *Handler) CreateSession(userID string) (string, error) {
 	return h.store.CreateSession(userID)
 }
 
-// authenticateSession validates the session cookie and returns the associated userID.
-// The cookie value is an opaque random token looked up in the sessions table —
-// it carries no identity information on its own, so forging it is computationally infeasible.
+// authenticateSession checks the session_token cookie — this identifies WHO the user is.
+// Unlike csrf_token (which just proves the request came from our frontend), session_token
+// is looked up in the sessions DB table to retrieve the actual userID.
+// The token itself is an opaque random string — it carries no identity on its own.
 func (h *Handler) authenticateSession(w http.ResponseWriter, r *http.Request) (string, bool) {
 	cookie, err := r.Cookie("session_token")
 	if err != nil || cookie.Value == "" {
